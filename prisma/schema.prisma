@@ -1,0 +1,411 @@
+// HH-BACKEND/prisma/schema.prisma
+
+generator client {
+  provider        = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum Area {
+  LogisticaYRecursos
+  IngenieriaYSupervision
+  GestionDocumentaria
+  OperacionesDeCampo
+}
+
+enum Prioridad {
+  Baja
+  Media
+  Alta
+  Critica
+}
+
+enum EstadoProyecto {
+  Planificacion
+  EnEjecucion
+  Detenido
+  Finalizado
+}
+
+enum Semaforo {
+  Verde
+  Amarillo
+  Rojo
+}
+
+enum TipoActividad {
+  Tecnica
+  Administrativa
+  Logistica
+  Documental
+  Validacion
+}
+
+enum TipoValidacion {
+  Tecnica
+  Campo
+  Documental
+  Calidad
+}
+
+enum EstadoActividad {
+  Pendiente
+  EnProgreso
+  Completada
+  Validada
+  Bloqueada
+}
+
+enum EstadoValidacion {
+  Pendiente
+  Aprobada
+  Rechazada
+  Observada
+}
+
+enum TipoDocumento {
+  Tecnica
+  Administrativa
+  Legal
+  Financiero
+  Otro
+}
+
+enum EstadoDocumento {
+  Borrador
+  PendienteRevision
+  Aprobado
+  Obsoleto
+}
+
+// ============================================
+// MODELS
+// ============================================
+
+model Responsable {
+  id               String         @id @default(uuid())
+  nombre           String
+  area             Area
+  cargo            String
+  email            String?
+  telefono         String?
+  avatar           String?
+  color            String
+  esSubresponsable Boolean?       @default(false)
+  reportesA        String? // ID del responsable principal
+  activo           Boolean?       @default(true)
+  proyectos        Proyecto[]     @relation("ResponsablePrincipal")
+  actividades      Actividad[]    @relation("ActividadResponsablePrincipal")
+  suboperaciones   Suboperacion[]
+  subtareas        Subtarea[]     @relation("SubtareaResponsable")
+  usuario          Usuario?
+}
+
+model Usuario {
+  id            String       @id @default(uuid())
+  username      String       @unique
+  password      String
+  nombre        String
+  rol           String       @default("USER")
+  activo        Boolean      @default(true)
+  responsableId String?      @unique
+  responsable   Responsable? @relation(fields: [responsableId], references: [id])
+  modulos       Json         @default("[\"dashboard\"]")
+  fechaCreacion DateTime     @default(now())
+}
+
+model Proyecto {
+  id                       String               @id @default(uuid())
+  clientId                 String
+  codigo                   String               @unique
+  nombre                   String
+  descripcion              String?              @db.Text
+  estado                   EstadoProyecto
+  semaforo                 Semaforo
+  prioridad                Prioridad
+
+  fechaInicio              DateTime
+  fechaFinEstimada         DateTime
+  fechaFinReal             DateTime?
+
+  responsablePrincipalId   String
+  responsablePrincipal     Responsable          @relation("ResponsablePrincipal", fields: [responsablePrincipalId], references: [id])
+  responsablesAdicionales  Json                 @default("[]") // Storing as JSON array of IDs
+
+  area                     Area
+
+  actividades              Actividad[]
+  reportesDiarios          ReporteDiario[]
+  comentarios              Comentario[]         @relation("ProyectoComentarios")
+  evidencias               Evidencia[]          @relation("ProyectoEvidencias")
+  documentos               Documento[]          @relation("ProyectoDocumentos")
+
+  evaluacionTecnica        EvaluacionTecnica?
+  ingenieriaDiseno         IngenieriaDiseno?
+  expedienteTecnico        ExpedienteTecnico?
+  suboperaciones           Suboperacion[]
+
+  avance                   Float                @default(0)
+  avanceCalculado          Float                @default(0)
+  costoPresupuestado       Float?
+  costoReal                Float?
+
+  historialCambios         HistorialCambio[]    @relation("ProyectoHistorialCambios")
+  indicadoresAvance        IndicadorAvance[]
+
+  creadoPor                String?
+  fechaCreacion            DateTime             @default(now())
+  actualizadoPor           String?
+  fechaActualizacion       DateTime?            @updatedAt
+}
+
+model Actividad {
+  id                       String               @id @default(uuid())
+  proyectoId               String
+  proyecto                 Proyecto             @relation(fields: [proyectoId], references: [id])
+  descripcion              String               @db.Text
+  tipo                     TipoActividad
+  prioridad                Prioridad
+  estado                   EstadoActividad
+  fechaCreacion            DateTime             @default(now())
+  fechaInicio              DateTime?
+  fechaFin                 DateTime?
+  fechaVencimiento         DateTime?
+
+  responsablePrincipalId   String
+  responsablePrincipal     Responsable          @relation("ActividadResponsablePrincipal", fields: [responsablePrincipalId], references: [id])
+  responsablesApoyo        Json                 @default("[]") // Storing as JSON array of IDs
+
+  validacionesRequeridas   ValidacionRequerida[]
+  subtareas                Subtarea[]           @relation("ActividadSubtareas")
+  checklistBloqueado       Boolean?             @default(false)
+  motivoBloqueoChecklist   String?
+  desbloqueadoPor          String?
+  fechaDesbloqueoChecklist DateTime?
+
+  comentarios              Comentario[]         @relation("ActividadComentarios")
+  evidencias               Evidencia[]          @relation("ActividadEvidencias")
+  observaciones            String?              @db.Text
+  seguimientoOperativo     String?              @db.Text
+
+  progreso                 Float                @default(0)
+  ponderacion              Float?
+  orden                    Int?
+
+  historialCambios         HistorialCambio[]    @relation("ActividadHistorialCambios")
+
+  padreId                  String? // Self-referencing or linking to another Actividad as parent
+  esSuboperacion           Boolean?             @default(false)
+}
+
+model Subtarea {
+  id               String    @id @default(uuid())
+  actividadId      String
+  actividad        Actividad @relation("ActividadSubtareas", fields: [actividadId], references: [id])
+  descripcion      String    @db.Text
+  completada       Boolean   @default(false)
+  responsableId    String?
+  responsable      Responsable? @relation("SubtareaResponsable", fields: [responsableId], references: [id])
+  fechaVencimiento DateTime?
+  fechaCompletada  DateTime?
+  bloqueada        Boolean?  @default(false)
+  motivoBloqueo    String?
+}
+
+model ValidacionRequerida {
+  id              String           @id @default(uuid())
+  actividadId     String
+  actividad       Actividad        @relation(fields: [actividadId], references: [id])
+  tipo            TipoValidacion
+  area            Area
+  estado          EstadoValidacion
+  validadoPor     String?
+  fechaValidacion DateTime?
+  observaciones   String?          @db.Text
+  evidenciaUrl    String?
+}
+
+model Comentario {
+  id           String      @id @default(uuid())
+  proyectoId   String?
+  proyecto     Proyecto?   @relation("ProyectoComentarios", fields: [proyectoId], references: [id], onDelete: Cascade)
+  actividadId  String?
+  actividad    Actividad?  @relation("ActividadComentarios", fields: [actividadId], references: [id], onDelete: Cascade)
+  usuario      String
+  usuarioArea  Area
+  contenido    String      @db.Text
+  fecha        DateTime    @default(now())
+  esInterno    Boolean     @default(false)
+}
+
+model Evidencia {
+  id            String         @id @default(uuid())
+  proyectoId    String?
+  proyecto      Proyecto?      @relation("ProyectoEvidencias", fields: [proyectoId], references: [id], onDelete: Cascade)
+  actividadId   String?
+  actividad     Actividad?     @relation("ActividadEvidencias", fields: [actividadId], references: [id], onDelete: Cascade)
+  reporteDiarioId String?
+  reporteDiario ReporteDiario? @relation("ReporteDiarioEvidencias", fields: [reporteDiarioId], references: [id], onDelete: Cascade)
+  nombre        String
+  tipo          String
+  url           String
+  tamano        String
+  subidoPor     String
+  fecha         DateTime       @default(now())
+  descripcion   String?        @db.Text
+}
+
+model EvaluacionTecnica {
+  id                 String     @id @default(uuid())
+  proyectoId         String     @unique
+  proyecto           Proyecto   @relation(fields: [proyectoId], references: [id])
+  fechaEvaluacion    DateTime
+  evaluadoPor        String
+  hallazgos          Json       @default("[]") // Storing as JSON array of Strings
+  solucionesPropuestas Json     @default("[]") // Storing as JSON array of Strings
+  recomendaciones    String     @db.Text
+  estado             String // 'Pendiente' | 'En Progreso' | 'Completada' - Use string for now, could be enum
+  documentoUrl       String?
+}
+
+model IngenieriaDiseno {
+  id                    String             @id @default(uuid())
+  proyectoId            String             @unique
+  proyecto              Proyecto           @relation(fields: [proyectoId], references: [id])
+  fechaInicio           DateTime
+  fechaFinEstimada      DateTime?
+  ingenieroResponsable  String
+  planos                PlanoDiseno[]
+  especificaciones      Json               @default("[]") // Storing as JSON array of Strings
+  estado                String // 'Pendiente' | 'En Progreso' | 'Aprobado' | 'Obsoleto' - Use string for now, could be enum
+}
+
+model PlanoDiseno {
+  id                    String             @id @default(uuid())
+  ingenieriaDisenoId    String
+  ingenieriaDiseno      IngenieriaDiseno   @relation(fields: [ingenieriaDisenoId], references: [id])
+  numero                String
+  titulo                String
+  descripcion           String?            @db.Text
+  url                   String
+  version               String
+  fecha                 DateTime
+  estado                String // 'Borrador' | 'En Revisión' | 'Aprobado' - Use string for now, could be enum
+}
+
+model ExpedienteTecnico {
+  id                 String     @id @default(uuid())
+  proyectoId         String     @unique
+  proyecto           Proyecto   @relation(fields: [proyectoId], references: [id])
+  numeroExpediente   String
+  titulo             String
+  descripcion        String?    @db.Text
+  contenido          Documento[] @relation("ExpedienteTecnicoDocumentos")
+  estado             String // 'En Elaboración' | 'Completo' | 'Archivado' - Use string for now, could be enum
+  fechaCreacion      DateTime   @default(now())
+  fechaActualizacion DateTime   @updatedAt
+}
+
+model Documento {
+  id                    String           @id @default(uuid())
+  proyectoId            String?
+  proyecto              Proyecto?        @relation("ProyectoDocumentos", fields: [proyectoId], references: [id])
+  expedienteTecnicoId   String?
+  expedienteTecnico     ExpedienteTecnico? @relation("ExpedienteTecnicoDocumentos", fields: [expedienteTecnicoId], references: [id])
+  clientId              String?
+  nombre                String
+  tipo                  TipoDocumento
+  subtype               String?
+  numero                String?
+  url                   String
+  version               String?
+  estado                EstadoDocumento
+  subidoPor             String
+  fechaSubida           DateTime         @default(now())
+  fechaVencimiento      DateTime?
+  // validaciones          ValidacionRequerida[] // This needs a many-to-many or a JSON array
+  observaciones         String?          @db.Text
+  esEntregable          Boolean?         @default(false)
+}
+
+model Suboperacion {
+  id                     String             @id @default(uuid())
+  proyectoId             String
+  proyecto               Proyecto           @relation(fields: [proyectoId], references: [id])
+  actividadPadreId       String?
+  titulo                 String
+  descripcion            String             @db.Text
+  tipo                   TipoActividad
+  responsablePrincipalId String
+  responsablePrincipal   Responsable        @relation(fields: [responsablePrincipalId], references: [id])
+  responsablesApoyo      Json               @default("[]")
+  fechaInicio            DateTime
+  fechaFinEstimada       DateTime
+  fechaFinReal           DateTime?
+  progreso               Float              @default(0)
+  estado                 EstadoActividad
+  entregables            Entregable[]
+  // validaciones           ValidacionRequerida[] // This needs a many-to-many or a JSON array
+}
+
+model Entregable {
+  id             String        @id @default(uuid())
+  suboperacionId String
+  suboperacion   Suboperacion  @relation(fields: [suboperacionId], references: [id])
+  nombre         String
+  descripcion    String?       @db.Text
+  tipo           String // 'Documento' | 'Plano' | 'Informe' | 'Certificado' | 'Otro' - Use string for now, could be enum
+  url            String?
+  estado         String // 'Pendiente' | 'En Progreso' | 'Entregado' | 'Aprobado' - Use string for now, could be enum
+  fechaEntrega   DateTime?
+  fechaAprobacion DateTime?
+  aprobadoPor    String?
+}
+
+model ReporteDiario {
+  id             String      @id @default(uuid())
+  proyectoId     String
+  proyecto       Proyecto    @relation(fields: [proyectoId], references: [id])
+  fecha          DateTime
+  usuario        String
+  usuarioArea    Area
+  actividades    String      @db.Text
+  hallazgos      String      @db.Text
+  personal       String      @db.Text
+  proximosPasos  String      @db.Text
+  evidencias     Evidencia[] @relation("ReporteDiarioEvidencias")
+  estado         String // 'Borrador' | 'Enviado' | 'Revisado' - Use string for now, could be enum
+}
+
+model HistorialCambio {
+  id          String      @id @default(uuid())
+  proyectoId  String?
+  proyecto    Proyecto?   @relation("ProyectoHistorialCambios", fields: [proyectoId], references: [id], onDelete: Cascade)
+  actividadId String?
+  actividad   Actividad?  @relation("ActividadHistorialCambios", fields: [actividadId], references: [id], onDelete: Cascade)
+  campo       String
+  valorAnterior String    @db.Text
+  valorNuevo  String    @db.Text
+  usuario     String
+  area        Area
+  fecha       DateTime  @default(now())
+  motivo      String?   @db.Text
+}
+
+model IndicadorAvance {
+  id                  String   @id @default(uuid())
+  proyectoId          String
+  proyecto            Proyecto @relation(fields: [proyectoId], references: [id])
+  area                Area
+  porcentaje          Float
+  actividadesTotal    Int
+  actividadesCompletadas Int
+  ultimaActualizacion DateTime
+}

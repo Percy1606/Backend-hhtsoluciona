@@ -1,0 +1,31 @@
+import { IsString, IsNotEmpty, IsOptional, IsBoolean, IsUUID, ValidateIf } from 'class-validator';
+
+export class CreateUserDto {
+  @IsString()
+  @IsNotEmpty()
+  username: string;
+
+  @IsString()
+  @IsNotEmpty()
+  password?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  nombre: string;
+
+  @IsString()
+  @IsOptional()
+  rol?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  activo?: boolean;
+
+  @ValidateIf((o) => o.responsableId !== null && o.responsableId !== '')
+  @IsUUID()
+  @IsOptional()
+  responsableId?: string | null;
+
+  @IsOptional()
+  modulos?: any;
+}
