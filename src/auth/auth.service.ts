@@ -17,7 +17,8 @@ export class AuthService {
       include: { responsable: true },
     });
 
-    if (user && (await bcrypt.compare(pass, user.password))) {
+    // Validar que el usuario exista, esté activo y la contraseña sea correcta
+    if (user && user.activo && user.password && (await bcrypt.compare(pass, user.password))) {
       const { password, ...result } = user;
       return result;
     }

@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEnum, IsNumber, Min, Max, IsDateString, IsBoolean, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsNumber, Min, Max, IsDateString, IsBoolean, IsArray, Allow } from 'class-validator';
 import { TipoActividad, Prioridad, EstadoActividad } from '@prisma/client';
 
 export class CreateActividadDto {
@@ -65,6 +65,9 @@ export class CreateActividadDto {
   @IsOptional()
   @IsString()
   observaciones?: string;
+
+  @Allow()
+  userRole?: string;
 
   @IsOptional()
   @IsString()

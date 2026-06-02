@@ -1,4 +1,7 @@
-import { Controller, Get, Post, Body, Param, Put, Delete, HttpCode, HttpStatus, UsePipes, ValidationPipe, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Put, Delete, HttpCode, HttpStatus, UsePipes, ValidationPipe, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname } from 'path';
 import { OperacionesService } from './operaciones.service';
 import { CreateProyectoDto } from './dto/create-proyecto.dto';
 import { UpdateProyectoDto } from './dto/update-proyecto.dto';
@@ -19,11 +22,39 @@ import { CreateDocumentoDto } from './dto/create-documento.dto';
 export class OperacionesController {
   constructor(private readonly operacionesService: OperacionesService) {}
 
-  // ... (previous methods)
+  // ============================================
+  // ARCHIVOS (SUBIDA REAL)
+  // ============================================
+@Post('upload')
+@Modules('operaciones')
+@UseInterceptors(FileInterceptor('file', {
+  storage: diskStorage({
+    destination: './uploads',
+    filename: (req: any, file: any, cb: any) => {
+      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+      cb(null, `${uniqueSuffix}${extname(file.originalname)}`);
+    },
+  }),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+}))
+async uploadFile(@UploadedFile() file: any) {
+  if (!file) {
+    throw new Error('No se pudo procesar el archivo. Verifique el tamaño (máx 10MB).');
+  }
+  // Retornamos la URL relativa para que el frontend la use
+  return {
+    url: `/uploads/${file.filename}`,
+    nombre: file.originalname,
+    tipo: file.mimetype,
+    tamano: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+  };
+}
 
-  // ============================================
-  // COMENTARIOS Y EVIDENCIAS
-  // ============================================
+// ============================================
+// COMENTARIOS Y EVIDENCIAS
+// ============================================
 
   @Post('comentarios')
   @Modules('operaciones')
@@ -155,7 +186,7 @@ export class OperacionesController {
   @Put('actividades/:id')
   @Modules('operaciones')
   async updateActividad(@Param('id') id: string, @Body() updateActividadDto: UpdateActividadDto) {
-    return this.operacionesService.updateActividad(id, updateActividadDto);
+    return this.operacionesService.updateActividad(id, updateActividadDto, updateActividadDto.userRole);
   }
 
   @Delete('actividades/:id')

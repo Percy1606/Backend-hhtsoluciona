@@ -37,8 +37,9 @@ export class CreateDocumentoDto {
   @IsString()
   version?: string;
 
+  @IsOptional()
   @IsEnum(EstadoDocumento)
-  estado: EstadoDocumento;
+  estado?: EstadoDocumento;
 
   @IsString()
   @IsNotEmpty()

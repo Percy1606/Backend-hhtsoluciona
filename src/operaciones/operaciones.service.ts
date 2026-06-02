@@ -47,11 +47,12 @@ export class OperacionesService {
   // ============================================
 
   async createDocumento(dto: CreateDocumentoDto) {
+    const { fechaVencimiento, ...data } = dto;
     return this.prisma.documento.create({
       data: {
-        ...dto,
-        fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : null,
-      },
+        ...data,
+        fechaVencimiento: fechaVencimiento ? new Date(fechaVencimiento) : null,
+      } as any, // Bypass for complex XOR types if mapping is still ambiguous
     });
   }
 
@@ -305,9 +306,10 @@ export class OperacionesService {
   // ============================================
 
   async createActividad(dto: CreateActividadDto): Promise<any> {
+    const { userRole, ...prismaData } = dto;
     const actividad = await this.prisma.actividad.create({
       data: {
-        ...dto,
+        ...prismaData,
         fechaCreacion: new Date(dto.fechaCreacion),
         fechaInicio: dto.fechaInicio ? new Date(dto.fechaInicio) : null,
         fechaFin: dto.fechaFin ? new Date(dto.fechaFin) : null,
@@ -321,14 +323,35 @@ export class OperacionesService {
     return actividad;
   }
 
-  async updateActividad(id: string, dto: UpdateActividadDto): Promise<any> {
+  async updateActividad(id: string, dto: UpdateActividadDto, userRole?: string): Promise<any> {
     const oldActividad = await this.prisma.actividad.findUnique({ where: { id } });
     if (!oldActividad) throw new NotFoundException(`Actividad con ID "${id}" no encontrada.`);
+
+    // Restricciones de estado 'Validada'
+    if (dto.estado === 'Validada' && userRole !== 'ADMIN') {
+      throw new Error('Solo el administrador puede validar actividades.');
+    }
+
+    // Si la actividad ya está validada, solo el admin puede tocarla
+    if (oldActividad.estado === 'Validada' && userRole !== 'ADMIN') {
+      throw new Error('Esta actividad ya ha sido validada y está bloqueada. Contacte al administrador.');
+    }
+
+    // Calcular progreso automático basado en el estado si se cambia el estado
+    let nuevoProgreso = dto.progreso;
+    if (dto.estado && dto.estado !== oldActividad.estado) {
+      if (dto.estado === 'Pendiente') nuevoProgreso = 0;
+      else if (dto.estado === 'EnProgreso') nuevoProgreso = 50;
+      else if (dto.estado === 'Completada' || dto.estado === 'Validada') nuevoProgreso = 100;
+    }
+
+    const { userRole: _, ...prismaData } = dto;
 
     const updated = await this.prisma.actividad.update({
       where: { id },
       data: {
-        ...dto,
+        ...prismaData,
+        progreso: nuevoProgreso !== undefined ? nuevoProgreso : oldActividad.progreso,
         fechaInicio: dto.fechaInicio ? new Date(dto.fechaInicio) : undefined,
         fechaFin: dto.fechaFin ? new Date(dto.fechaFin) : undefined,
         fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : undefined,
@@ -432,7 +455,7 @@ export class OperacionesService {
         valorNuevo: String(valorNuevo),
         usuario: 'Sistema',
         area: 'OperacionesDeCampo',
-        fecha: new Date(),
+        fecha: new Date(), // Esto ya guarda la hora real (UTC) en la DB
       }
     });
   }
