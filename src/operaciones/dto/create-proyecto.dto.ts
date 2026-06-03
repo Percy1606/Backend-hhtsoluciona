@@ -41,4 +41,7 @@ export class CreateProyectoDto {
 
   @IsEnum(Area)
   area: Area;
+
+  @IsString()
+  cotizacionId: string;
 }

@@ -7,6 +7,8 @@ import { OperacionesModule } from './operaciones/operaciones.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { ConfigModule } from './config/config.module';
+import { CrmModule } from './crm/crm.module';
+import { CotizacionesModule } from './cotizaciones/cotizaciones.module';
 
 @Module({
   imports: [
@@ -17,7 +19,9 @@ import { ConfigModule } from './config/config.module';
     AuthModule, 
     ConfigModule, 
     OperacionesModule, 
-    PrismaModule
+    PrismaModule,
+    CrmModule,
+    CotizacionesModule
   ],
   controllers: [AppController],
   providers: [AppService],

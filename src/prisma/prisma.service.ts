@@ -18,9 +18,9 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   async onModuleInit() {
     try {
       await this.$connect();
-      this.logger.log('✅ Conexión exitosa a la base de datos MySQL en Aiven.');
+      this.logger.log('✅ Conexión exitosa a la base de datos MySQL.');
     } catch (error) {
-      this.logger.error('❌ Error al conectar a la base de datos en Aiven:', error);
+      this.logger.error('❌ Error al conectar a la base de datos:', error);
     }
   }
 

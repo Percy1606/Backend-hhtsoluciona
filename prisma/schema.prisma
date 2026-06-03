@@ -88,6 +88,99 @@ enum EstadoDocumento {
 // MODELS
 // ============================================
 
+model Cliente {
+  id                  String         @id @default(uuid())
+  codigo              String         @unique
+  empresa             String
+  ruc                 String         @unique
+  direccion           String
+  tarifa              String         // MT3 | MT4
+  contacto            String
+  telefono            String?
+  cargo               String?
+  correo              String?
+  asignadoA           String
+  diaTrabajo          String?
+  estado              String
+  prioridad           String         // Baja | Media | Alta | Critica
+  accion              String
+  ultimoContacto      DateTime?
+  proximoSeguimiento  DateTime?
+  observaciones       String?        @db.Text
+  zona                String
+  semaforo            String         // Verde | Amarillo | Rojo
+  temperatura         String         // Frio | Tibio | Caliente | Muy Caliente
+  montoEstimado       Float          @default(0)
+  probabilidad        Float          @default(0)
+  ventaProyectada     Float          @default(0)
+  tipoCliente         String?
+  etapaComercial      String
+  
+  interacciones       Interaccion[]
+  proyectos           Proyecto[]     @relation("ClienteProyectos")
+  documentos          Documento[]    @relation("ClienteDocumentos")
+  cotizaciones        Cotizacion[]   @relation("ClienteCotizaciones")
+  
+  hallazgosTecnicos   Json?          @default("[]")
+  solucionesPropuestas Json?         @default("[]")
+  propuestaTecnicaUrl String?
+
+  fechaCreacion       DateTime       @default(now())
+  fechaActualizacion  DateTime?      @updatedAt
+
+  @@map("CLIENTE")
+}
+
+model Interaccion {
+  id            String      @id @default(uuid())
+  clientId      String
+  cliente       Cliente     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  cotizacionId  String?
+  cotizacion    Cotizacion? @relation(fields: [cotizacionId], references: [id], onDelete: SetNull)
+  fecha         DateTime    @default(now())
+  tipo          String
+  accion        String
+  observaciones String      @db.Text
+  usuario       String
+
+  @@map("INTERACCION")
+}
+
+model Cotizacion {
+  id                String       @id @default(uuid())
+  codigo            String       @unique
+  clientId          String
+  cliente           Cliente      @relation("ClienteCotizaciones", fields: [clientId], references: [id], onDelete: Cascade)
+  referencia        String?      @db.Text
+  objetivo          String?      @db.Text
+  alcance           Json?        @default("[]") // { "evaluacion": "", "ingenieria": "", "expediente": "" }
+  consideraciones   String?      @db.Text
+  entregables       String?      @db.Text
+  monto             Float        @default(0)
+  estado            String       // Pendiente | Enviada | Aprobada | Rechazada
+  fecha             DateTime     @default(now())
+  plazo             String?      @default("7 días")
+  validez           String?      @default("15 días")
+  formaPago         String?      @db.Text
+  observaciones     String?      @db.Text
+  
+  version           Int          @default(1)
+  cotizacionPadreId String?
+  cotizacionPadre   Cotizacion?  @relation("Revisiones", fields: [cotizacionPadreId], references: [id])
+  revisiones        Cotizacion[] @relation("Revisiones")
+
+  documentos        Documento[]  @relation("CotizacionDocumentos")
+  interacciones     Interaccion[]
+  
+  proyectoGeneradoId String?     @unique // Link to the project created once approved
+  proyectoGenerado   Proyecto?   @relation("CotizacionProyecto", fields: [proyectoGeneradoId], references: [id])
+
+  fechaCreacion       DateTime       @default(now())
+  fechaActualizacion  DateTime?      @updatedAt
+
+  @@map("COTIZACION")
+}
+
 model Responsable {
   id               String         @id @default(uuid())
   nombre           String
@@ -122,7 +215,8 @@ model Usuario {
 
 model Proyecto {
   id                       String               @id @default(uuid())
-  clientId                 String
+  clientId                 String?
+  cliente                  Cliente?             @relation("ClienteProyectos", fields: [clientId], references: [id])
   codigo                   String               @unique
   nombre                   String
   descripcion              String?              @db.Text
@@ -155,6 +249,8 @@ model Proyecto {
   avanceCalculado          Float                @default(0)
   costoPresupuestado       Float?
   costoReal                Float?
+
+  cotizacionOrigen         Cotizacion?          @relation("CotizacionProyecto")
 
   historialCambios         HistorialCambio[]    @relation("ProyectoHistorialCambios")
   indicadoresAvance        IndicadorAvance[]
@@ -319,6 +415,9 @@ model Documento {
   expedienteTecnicoId   String?
   expedienteTecnico     ExpedienteTecnico? @relation("ExpedienteTecnicoDocumentos", fields: [expedienteTecnicoId], references: [id])
   clientId              String?
+  cliente               Cliente?         @relation("ClienteDocumentos", fields: [clientId], references: [id])
+  cotizacionId          String?
+  cotizacion            Cotizacion?      @relation("CotizacionDocumentos", fields: [cotizacionId], references: [id])
   nombre                String
   tipo                  TipoDocumento
   subtype               String?

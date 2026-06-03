@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service'; // Import PrismaService
 import { PrismaClient, Proyecto as PrismaProyecto, Responsable as PrismaResponsable, Semaforo, EstadoProyecto, Actividad, EstadoActividad } from '@prisma/client'; // Import Prisma types
 import { CreateProyectoDto } from './dto/create-proyecto.dto';
@@ -132,6 +132,11 @@ export class OperacionesService {
     return this.prisma.proyecto.findMany({
       include: {
         responsablePrincipal: true,
+        cotizacionOrigen: {
+          select: {
+            estado: true
+          }
+        },
         actividades: {
           include: {
             responsablePrincipal: true,
@@ -178,6 +183,11 @@ export class OperacionesService {
       where: { id },
       include: {
         responsablePrincipal: true,
+        cotizacionOrigen: {
+          select: {
+            estado: true
+          }
+        },
         actividades: {
           include: {
             responsablePrincipal: true,
@@ -223,15 +233,35 @@ export class OperacionesService {
   }
 
   async createProyecto(createProyectoDto: CreateProyectoDto): Promise<PrismaProyecto> {
+    const { cotizacionId, ...dto } = createProyectoDto;
+
+    // VALIDACIÓN: Verificar si existe la cotización y si está aprobada
+    const cotizacion = await this.prisma.cotizacion.findUnique({
+      where: { id: cotizacionId },
+    });
+
+    if (!cotizacion) {
+      throw new BadRequestException('La cotización asociada no existe.');
+    }
+
+    // Aceptamos tanto 'Aprobada' (DB comment) como 'Aprobado' (Frontend/CRM store)
+    const approvedStatuses = ['Aprobada', 'Aprobado'];
+    if (!approvedStatuses.includes(cotizacion.estado)) {
+      throw new BadRequestException({
+        error: 'Proyecto no autorizado',
+        message: 'No es posible registrar este proyecto porque la cotización asociada aún no ha sido aprobada por el cliente.\n\nPor favor, contacte al área comercial para validar el estado de la negociación o gestionar la aprobación correspondiente antes de continuar.\n\nUna vez que la cotización se encuentre en estado APROBADA, podrá registrar el proyecto.'
+      });
+    }
+
     const newProyectoId = uuidv4();
     const projectCode = await this.generateProjectCode();
     const initialSemaforo = this.calculateSemaforo({
-      ...createProyectoDto,
-      fechaInicio: new Date(createProyectoDto.fechaInicio),
-      fechaFinEstimada: new Date(createProyectoDto.fechaFinEstimada),
+      ...dto,
+      fechaInicio: new Date(dto.fechaInicio),
+      fechaFinEstimada: new Date(dto.fechaFinEstimada),
     });
 
-    const responsablesAdicionalesJson = JSON.stringify(createProyectoDto.responsablesAdicionales || []);
+    const responsablesAdicionalesJson = JSON.stringify(dto.responsablesAdicionales || []);
 
     const proyecto = await this.prisma.proyecto.create({
       data: {
@@ -242,10 +272,11 @@ export class OperacionesService {
         avanceCalculado: 0,
         creadoPor: 'Admin',
         fechaCreacion: new Date().toISOString(),
-        ...createProyectoDto,
-        fechaInicio: new Date(createProyectoDto.fechaInicio),
-        fechaFinEstimada: new Date(createProyectoDto.fechaFinEstimada),
+        ...dto,
+        fechaInicio: new Date(dto.fechaInicio),
+        fechaFinEstimada: new Date(dto.fechaFinEstimada),
         responsablesAdicionales: responsablesAdicionalesJson,
+        cotizacionOrigen: { connect: { id: cotizacionId } }
       },
     });
 
@@ -292,8 +323,54 @@ export class OperacionesService {
 
   async removeProyecto(id: string): Promise<void> {
     try {
-      await this.prisma.proyecto.delete({ where: { id } });
+      await this.prisma.$transaction(async (tx) => {
+        // 1. Obtener IDs de entidades relacionadas para borrado manual en cascada
+        const actividades = await tx.actividad.findMany({ where: { proyectoId: id }, select: { id: true } });
+        const actividadIds = actividades.map(a => a.id);
+
+        const suboperaciones = await tx.suboperacion.findMany({ where: { proyectoId: id }, select: { id: true } });
+        const subopIds = suboperaciones.map(s => s.id);
+
+        const ingenierias = await tx.ingenieriaDiseno.findMany({ where: { proyectoId: id }, select: { id: true } });
+        const ingIds = ingenierias.map(i => i.id);
+
+        // 2. Borrar dependencias de Nivel 3 (hijos de actividades, subops e ingenierias)
+        if (actividadIds.length > 0) {
+           await tx.subtarea.deleteMany({ where: { actividadId: { in: actividadIds } } });
+           await tx.validacionRequerida.deleteMany({ where: { actividadId: { in: actividadIds } } });
+           // Evidencia, Comentario y HistorialCambio tienen onDelete: Cascade en la DB, pero si no funcionan, los borramos igual
+           await tx.evidencia.deleteMany({ where: { actividadId: { in: actividadIds } } });
+           await tx.comentario.deleteMany({ where: { actividadId: { in: actividadIds } } });
+           await tx.historialCambio.deleteMany({ where: { actividadId: { in: actividadIds } } });
+        }
+
+        if (subopIds.length > 0) {
+           await tx.entregable.deleteMany({ where: { suboperacionId: { in: subopIds } } });
+        }
+
+        if (ingIds.length > 0) {
+           await tx.planoDiseno.deleteMany({ where: { ingenieriaDisenoId: { in: ingIds } } });
+        }
+
+        // 3. Borrar dependencias de Nivel 2 (relacionadas directamente al proyecto)
+        await tx.actividad.deleteMany({ where: { proyectoId: id } });
+        await tx.suboperacion.deleteMany({ where: { proyectoId: id } });
+        await tx.ingenieriaDiseno.deleteMany({ where: { proyectoId: id } });
+        
+        await tx.reporteDiario.deleteMany({ where: { proyectoId: id } });
+        await tx.comentario.deleteMany({ where: { proyectoId: id } });
+        await tx.evidencia.deleteMany({ where: { proyectoId: id } });
+        await tx.documento.deleteMany({ where: { proyectoId: id } });
+        await tx.evaluacionTecnica.deleteMany({ where: { proyectoId: id } });
+        await tx.expedienteTecnico.deleteMany({ where: { proyectoId: id } });
+        await tx.historialCambio.deleteMany({ where: { proyectoId: id } });
+        await tx.indicadorAvance.deleteMany({ where: { proyectoId: id } });
+
+        // 4. Finalmente borrar el proyecto
+        await tx.proyecto.delete({ where: { id } });
+      });
     } catch (error: any) {
+      console.error("[Operaciones] Error al eliminar proyecto:", error);
       if (error.code === 'P2025') {
         throw new NotFoundException(`Proyecto con ID "${id}" no encontrado.`);
       }
