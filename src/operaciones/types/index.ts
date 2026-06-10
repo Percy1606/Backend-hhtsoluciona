@@ -61,9 +61,18 @@ export enum EstadoActividad {
   Bloqueada = 'Bloqueada',
 }
 
-export type TipoDocumento = 'Tecnica' | 'Administrativa' | 'Legal' | 'Financiero' | 'Otro';
+export type TipoDocumento =
+  | 'Tecnica'
+  | 'Administrativa'
+  | 'Legal'
+  | 'Financiero'
+  | 'Otro';
 
-export type EstadoDocumento = 'Borrador' | 'PendienteRevision' | 'Aprobado' | 'Obsoleto';
+export type EstadoDocumento =
+  | 'Borrador'
+  | 'PendienteRevision'
+  | 'Aprobado'
+  | 'Obsoleto';
 
 // ============================================
 // RESPONSABLE Y PERSONAL
@@ -127,8 +136,6 @@ export interface Actividad {
   subtareas: Subtarea[];
   checklistBloqueado?: boolean;
   motivoBloqueoChecklist?: string;
-  desbloqueadoPor?: string;
-  fechaDesbloqueoChecklist?: string;
   comentarios: Comentario[];
   evidencias: Evidencia[];
   observaciones?: string;

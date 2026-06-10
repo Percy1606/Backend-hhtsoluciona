@@ -57,7 +57,6 @@ export type {
   TipoDocumento,
 };
 
-
 export interface Proyecto {
   id: string;
   clientId: string;
@@ -135,8 +134,6 @@ export interface Actividad {
   subtareas: Subtarea[];
   checklistBloqueado?: boolean;
   motivoBloqueoChecklist?: string;
-  desbloqueadoPor?: string;
-  fechaDesbloqueoChecklist?: string;
 
   // Seguimiento
   comentarios: Comentario[];

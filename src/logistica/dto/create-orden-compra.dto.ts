@@ -1,0 +1,43 @@
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsNumber,
+  IsArray,
+  ValidateNested,
+  Min,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+
+class OrdenItemDto {
+  @IsString()
+  @IsNotEmpty()
+  insumoId: string;
+
+  @IsNumber()
+  @Min(0.01)
+  cantidad: number;
+
+  @IsNumber()
+  @Min(0)
+  precioUnitario: number;
+}
+
+export class CreateOrdenCompraDto {
+  @IsString()
+  @IsNotEmpty()
+  codigo: string;
+
+  @IsString()
+  @IsNotEmpty()
+  proveedorId: string;
+
+  @IsOptional()
+  @IsString()
+  observaciones?: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => OrdenItemDto)
+  items: OrdenItemDto[];
+}

@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  UseGuards,
+} from '@nestjs/common';
 import { ConfigService } from './config.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -11,6 +20,11 @@ import { Roles } from '../auth/roles.decorator';
 export class UsersController {
   constructor(private readonly configService: ConfigService) {}
 
+  @Get('online')
+  getOnlineUsers() {
+    return this.configService.getOnlineUsers();
+  }
+
   @Post()
   @Roles('ADMIN')
   create(@Body() createUserDto: CreateUserDto) {
@@ -18,11 +32,13 @@ export class UsersController {
   }
 
   @Get()
+  @Roles('ADMIN')
   findAll() {
     return this.configService.findAllUsers();
   }
 
   @Get(':id')
+  @Roles('ADMIN')
   findOne(@Param('id') id: string) {
     return this.configService.findOneUser(id);
   }

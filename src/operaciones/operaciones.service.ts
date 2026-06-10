@@ -1,6 +1,18 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service'; // Import PrismaService
-import { PrismaClient, Proyecto as PrismaProyecto, Responsable as PrismaResponsable, Semaforo, EstadoProyecto, Actividad, EstadoActividad } from '@prisma/client'; // Import Prisma types
+import {
+  PrismaClient,
+  Proyecto as PrismaProyecto,
+  Responsable as PrismaResponsable,
+  Semaforo,
+  EstadoProyecto,
+  Actividad,
+  EstadoActividad,
+} from '@prisma/client'; // Import Prisma types
 import { CreateProyectoDto } from './dto/create-proyecto.dto';
 import { UpdateProyectoDto } from './dto/update-proyecto.dto';
 import { CreateActividadDto } from './dto/create-actividad.dto';
@@ -9,17 +21,17 @@ import { CreateComentarioDto } from './dto/create-comentario.dto';
 import { CreateEvidenciaDto } from './dto/create-evidencia.dto';
 import { CreateReporteDiarioDto } from './dto/create-reporte.dto';
 import { CreateDocumentoDto } from './dto/create-documento.dto';
+import { NotificacionesService } from '../notificaciones/notificaciones.service';
+import { AuditoriaService } from '../auditoria/auditoria.service';
 import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class OperacionesService {
-  constructor(private prisma: PrismaService) {} // Inject PrismaService
-
-  // ... (previous methods)
-
-  // ============================================
-  // COMENTARIOS Y EVIDENCIAS
-  // ============================================
+  constructor(
+    private prisma: PrismaService,
+    private notificacionesService: NotificacionesService,
+    private auditoriaService: AuditoriaService,
+  ) {}
 
   async createComentario(dto: CreateComentarioDto) {
     return this.prisma.comentario.create({ data: dto });
@@ -28,10 +40,6 @@ export class OperacionesService {
   async createEvidencia(dto: CreateEvidenciaDto) {
     return this.prisma.evidencia.create({ data: dto });
   }
-
-  // ============================================
-  // REPORTES DIARIOS
-  // ============================================
 
   async createReporteDiario(dto: CreateReporteDiarioDto) {
     return this.prisma.reporteDiario.create({
@@ -42,17 +50,13 @@ export class OperacionesService {
     });
   }
 
-  // ============================================
-  // DOCUMENTOS
-  // ============================================
-
   async createDocumento(dto: CreateDocumentoDto) {
     const { fechaVencimiento, ...data } = dto;
     return this.prisma.documento.create({
       data: {
         ...data,
         fechaVencimiento: fechaVencimiento ? new Date(fechaVencimiento) : null,
-      } as any, // Bypass for complex XOR types if mapping is still ambiguous
+      } as any,
     });
   }
 
@@ -61,7 +65,9 @@ export class OperacionesService {
       where: { id },
       data: {
         ...dto,
-        fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : undefined,
+        fechaVencimiento: dto.fechaVencimiento
+          ? new Date(dto.fechaVencimiento)
+          : undefined,
       },
     });
   }
@@ -70,15 +76,11 @@ export class OperacionesService {
     return this.prisma.documento.delete({ where: { id } });
   }
 
-  // ============================================
-  // SUBOPERACIONES Y ENTREGABLES
-  // ============================================
-
   async createSuboperacion(data: any) {
     return this.prisma.suboperacion.create({
       data: {
         ...data,
-        responsablesApoyo: JSON.stringify(data.responsablesApoyo || []),
+        responsablesApoyo: data.responsablesApoyo || [],
         fechaInicio: new Date(data.fechaInicio),
         fechaFinEstimada: new Date(data.fechaFinEstimada),
       },
@@ -89,18 +91,14 @@ export class OperacionesService {
     return this.prisma.entregable.create({ data });
   }
 
-  // ============================================
-  // ALCANCE TÉCNICO
-  // ============================================
-
   async createEvaluacionTecnica(proyectoId: string, dto: any) {
     return this.prisma.evaluacionTecnica.create({
       data: {
         ...dto,
         proyectoId,
         fechaEvaluacion: new Date(dto.fechaEvaluacion),
-        hallazgos: JSON.stringify(dto.hallazgos || []),
-        solucionesPropuestas: JSON.stringify(dto.solucionesPropuestas || []),
+        hallazgos: dto.hallazgos || [],
+        solucionesPropuestas: dto.solucionesPropuestas || [],
       },
     });
   }
@@ -111,8 +109,10 @@ export class OperacionesService {
         ...dto,
         proyectoId,
         fechaInicio: new Date(dto.fechaInicio),
-        fechaFinEstimada: dto.fechaFinEstimada ? new Date(dto.fechaFinEstimada) : null,
-        especificaciones: JSON.stringify(dto.especificaciones || []),
+        fechaFinEstimada: dto.fechaFinEstimada
+          ? new Date(dto.fechaFinEstimada)
+          : null,
+        especificaciones: dto.especificaciones || [],
       },
     });
   }
@@ -126,56 +126,76 @@ export class OperacionesService {
     });
   }
 
-  // ... (rest of the class)
+  async findAllProyectos(
+    page: number = 1,
+    limit: number = 20,
+    filters: any = {},
+    user?: any,
+  ): Promise<any> {
+    const skip = (page - 1) * limit;
+    const where: any = {};
 
-  async findAllProyectos(): Promise<PrismaProyecto[]> {
-    return this.prisma.proyecto.findMany({
-      include: {
-        responsablePrincipal: true,
-        cotizacionOrigen: {
-          select: {
-            estado: true
-          }
-        },
-        actividades: {
-          include: {
-            responsablePrincipal: true,
-            subtareas: true,
-            validacionesRequeridas: true,
-            comentarios: true,
-            evidencias: true,
+    if (filters.search) {
+      where.OR = [
+        { nombre: { contains: filters.search } },
+        { codigo: { contains: filters.search } },
+      ];
+    }
+
+    if (filters.estado) where.estado = filters.estado;
+    if (filters.area) where.area = filters.area;
+    if (filters.responsablePrincipalId)
+      where.responsablePrincipalId = filters.responsablePrincipalId;
+
+    // FILTRO POR ROL
+    if (user && user.rol !== 'ADMIN') {
+      const responsableId = user.responsable?.id;
+      if (responsableId) {
+        where.responsablePrincipalId = responsableId;
+      } else {
+        where.responsablePrincipalId = 'NONE';
+      }
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.proyecto.findMany({
+        where,
+        include: {
+          responsablePrincipal: true,
+          cotizacionOrigen: { select: { estado: true } },
+          actividades: {
+            include: {
+              responsablePrincipal: true,
+              subtareas: true,
+              validacionesRequeridas: true,
+              comentarios: true,
+              evidencias: true,
+            },
           },
-        },
-        comentarios: true,
-        evidencias: true,
-        documentos: true,
-        suboperaciones: {
-          include: {
-            responsablePrincipal: true,
-            entregables: true,
+          comentarios: true,
+          evidencias: true,
+          documentos: true,
+          suboperaciones: {
+            include: {
+              responsablePrincipal: true,
+              entregables: true,
+            },
           },
+          evaluacionTecnica: true,
+          ingenieriaDiseno: { include: { planos: true } },
+          expedienteTecnico: { include: { contenido: true } },
+          reportesDiarios: { include: { evidencias: true } },
+          indicadoresAvance: true,
+          historialCambios: true,
         },
-        evaluacionTecnica: true,
-        ingenieriaDiseno: {
-          include: {
-            planos: true,
-          },
-        },
-        expedienteTecnico: {
-          include: {
-            contenido: true,
-          },
-        },
-        reportesDiarios: {
-          include: {
-            evidencias: true,
-          },
-        },
-        indicadoresAvance: true,
-        historialCambios: true,
-      },
-      orderBy: { fechaCreacion: 'desc' },
-    });
+        orderBy: { fechaCreacion: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.proyecto.count({ where }),
+    ]);
+
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async findOneProyecto(id: string): Promise<PrismaProyecto> {
@@ -183,11 +203,7 @@ export class OperacionesService {
       where: { id },
       include: {
         responsablePrincipal: true,
-        cotizacionOrigen: {
-          select: {
-            estado: true
-          }
-        },
+        cotizacionOrigen: { select: { estado: true } },
         actividades: {
           include: {
             responsablePrincipal: true,
@@ -207,156 +223,312 @@ export class OperacionesService {
           },
         },
         evaluacionTecnica: true,
-        ingenieriaDiseno: {
-          include: {
-            planos: true,
-          },
-        },
-        expedienteTecnico: {
-          include: {
-            contenido: true,
-          },
-        },
-        reportesDiarios: {
-          include: {
-            evidencias: true,
-          },
-        },
+        ingenieriaDiseno: { include: { planos: true } },
+        expedienteTecnico: { include: { contenido: true } },
+        reportesDiarios: { include: { evidencias: true } },
         indicadoresAvance: true,
         historialCambios: true,
       },
     });
-    if (!proyecto) {
+    if (!proyecto)
       throw new NotFoundException(`Proyecto con ID "${id}" no encontrado.`);
-    }
     return proyecto;
   }
 
-  async createProyecto(createProyectoDto: CreateProyectoDto): Promise<PrismaProyecto> {
+  async getProjectCosts(id: string) {
+    const proyecto = await this.prisma.proyecto.findUnique({
+      where: { id },
+      select: { id: true, nombre: true, costoPresupuestado: true },
+    });
+    if (!proyecto)
+      throw new NotFoundException(`Proyecto con ID "${id}" no encontrado.`);
+
+    // 1. Costos de Logística (Despachos de materiales a la obra)
+    const movimientos = await this.prisma.movimientoAlmacen.findMany({
+      where: { proyectoId: id, tipo: 'SALIDA' },
+      include: {
+        insumo: { select: { precioReferencial: true, nombre: true } },
+      },
+    });
+
+    const costoMateriales = movimientos.reduce((sum, mov) => {
+      const precio = mov.insumo?.precioReferencial || 0;
+      return sum + mov.cantidad * precio;
+    }, 0);
+
+    // 2. Costos de Finanzas (Gastos directos asignados a la obra)
+    const gastos = await this.prisma.gasto.findMany({
+      where: { proyectoId: id, estado: { not: 'ANULADO' } },
+    });
+
+    const costoServicios = gastos.reduce((sum, g) => sum + g.montoTotal, 0);
+
+    const costoTotalReal = costoMateriales + costoServicios;
+    const presupuesto = proyecto.costoPresupuestado || 0;
+    const porcentajeConsumo =
+      presupuesto > 0 ? (costoTotalReal / presupuesto) * 100 : 0;
+    const margenRestante = presupuesto - costoTotalReal;
+
+    return {
+      proyectoId: id,
+      nombre: proyecto.nombre,
+      presupuesto,
+      costoTotalReal,
+      porcentajeConsumo: Math.round(porcentajeConsumo * 100) / 100,
+      margenRestante,
+      desglose: {
+        materialesLogistica: costoMateriales,
+        gastosFinanzas: costoServicios,
+      },
+      historialMateriales: movimientos.map((m) => ({
+        fecha: m.fecha,
+        material: m.insumo?.nombre || 'Insumo Eliminado',
+        cantidad: m.cantidad,
+        costoCalculado: m.cantidad * (m.insumo?.precioReferencial || 0),
+      })),
+      historialGastos: gastos.map((g) => ({
+        fecha: g.fechaEmision,
+        concepto: g.concepto,
+        monto: g.montoTotal,
+        tipo: g.tipo,
+      })),
+    };
+  }
+
+  async createProyecto(
+    createProyectoDto: CreateProyectoDto,
+    user?: any,
+  ): Promise<PrismaProyecto> {
     const { cotizacionId, ...dto } = createProyectoDto;
 
-    // VALIDACIÓN: Verificar si existe la cotización y si está aprobada
+    // RESTRICCIÓN: Un cliente solo puede tener UN proyecto operativo activo a la vez.
+    const existingActiveProject = await this.prisma.proyecto.findFirst({
+      where: {
+        clientId: dto.clientId,
+        estado: { not: 'Finalizado' },
+      },
+    });
+
+    if (existingActiveProject) {
+      throw new BadRequestException({
+        error: 'Cliente con Proyecto Activo',
+        message: `El cliente ya tiene un proyecto operativo vigente: "${existingActiveProject.nombre}" (${existingActiveProject.codigo}). Debe finalizar el proyecto actual antes de registrar uno nuevo.`,
+      });
+    }
+
     const cotizacion = await this.prisma.cotizacion.findUnique({
       where: { id: cotizacionId },
     });
-
-    if (!cotizacion) {
+    if (!cotizacion)
       throw new BadRequestException('La cotización asociada no existe.');
-    }
 
-    // Aceptamos tanto 'Aprobada' (DB comment) como 'Aprobado' (Frontend/CRM store)
-    const approvedStatuses = ['Aprobada', 'Aprobado'];
-    if (!approvedStatuses.includes(cotizacion.estado)) {
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { id: cotizacion.clientId },
+    });
+    if (!cliente)
+      throw new BadRequestException(
+        'El cliente asociado a la cotización no existe.',
+      );
+
+    const allowedStages = ['Ganado', 'Orden de Servicio'];
+    if (!allowedStages.includes(cliente.etapaComercial)) {
       throw new BadRequestException({
         error: 'Proyecto no autorizado',
-        message: 'No es posible registrar este proyecto porque la cotización asociada aún no ha sido aprobada por el cliente.\n\nPor favor, contacte al área comercial para validar el estado de la negociación o gestionar la aprobación correspondiente antes de continuar.\n\nUna vez que la cotización se encuentre en estado APROBADA, podrá registrar el proyecto.'
+        message: `No es posible registrar este proyecto porque el cliente (${cliente.empresa}) se encuentra en etapa "${cliente.etapaComercial}".`,
       });
     }
 
     const newProyectoId = uuidv4();
     const projectCode = await this.generateProjectCode();
-    const initialSemaforo = this.calculateSemaforo({
-      ...dto,
-      fechaInicio: new Date(dto.fechaInicio),
-      fechaFinEstimada: new Date(dto.fechaFinEstimada),
-    });
 
-    const responsablesAdicionalesJson = JSON.stringify(dto.responsablesAdicionales || []);
+    let initialSemaforo: Semaforo = Semaforo.Verde;
+    try {
+      initialSemaforo = this.calculateSemaforo({
+        estado: dto.estado,
+        fechaFinEstimada: dto.fechaFinEstimada,
+      });
+    } catch (e) {
+      console.error('Error calculating semaforo:', e);
+    }
 
-    const proyecto = await this.prisma.proyecto.create({
-      data: {
-        id: newProyectoId,
-        codigo: projectCode,
-        semaforo: initialSemaforo,
-        avance: 0,
-        avanceCalculado: 0,
-        creadoPor: 'Admin',
-        fechaCreacion: new Date().toISOString(),
-        ...dto,
-        fechaInicio: new Date(dto.fechaInicio),
-        fechaFinEstimada: new Date(dto.fechaFinEstimada),
-        responsablesAdicionales: responsablesAdicionalesJson,
-        cotizacionOrigen: { connect: { id: cotizacionId } }
-      },
-    });
+    try {
+      const proyecto = await this.prisma.proyecto.create({
+        data: {
+          id: newProyectoId,
+          codigo: projectCode,
+          nombre: String(dto.nombre).toUpperCase(),
+          descripcion: dto.descripcion || '',
+          estado: dto.estado,
+          prioridad: dto.prioridad,
+          area: dto.area,
+          semaforo: initialSemaforo,
+          avance: 0,
+          avanceCalculado: 0,
+          creadoPor: user?.nombre || 'Admin',
+          fechaCreacion: new Date(),
+          fechaInicio: new Date(dto.fechaInicio),
+          fechaFinEstimada: new Date(dto.fechaFinEstimada),
+          clientId: dto.clientId,
+          responsablePrincipalId: dto.responsablePrincipalId,
+          responsablesAdicionales: dto.responsablesAdicionales || [],
+          cotizacionOrigen: { connect: { id: cotizacionId } },
+        },
+      });
 
-    await this.registrarHistorial(proyecto.id, null, 'PROYECTO_CREADO', '', 'Proyecto creado');
-    return proyecto;
+      if (user) {
+        await this.auditoriaService.createLog({
+          usuarioId: user.id,
+          modulo: 'OPERACIONES',
+          accion: 'CREAR_PROYECTO',
+          detalles: { proyectoId: proyecto.id, nombre: proyecto.nombre },
+        });
+      }
+
+      // TRIGGER: Notificar al Responsable Principal
+      const userResponsable = await this.prisma.usuario.findUnique({
+        where: { responsableId: dto.responsablePrincipalId },
+      });
+
+      if (userResponsable) {
+        await this.notificacionesService.create({
+          usuarioId: userResponsable.id,
+          titulo: 'Nuevo Proyecto Asignado',
+          mensaje: `Se te ha asignado como Responsable Principal del proyecto: ${proyecto.nombre}.`,
+          tipo: 'SISTEMA',
+        });
+      }
+
+      await this.registrarHistorial(
+        proyecto.id,
+        null,
+        'PROYECTO_CREADO',
+        '',
+        'Proyecto creado desde CRM',
+      );
+      return proyecto;
+    } catch (error) {
+      console.error('Error in createProyecto Prisma call:', error);
+      throw error;
+    }
   }
 
-  async updateProyecto(id: string, updateProyectoDto: UpdateProyectoDto): Promise<PrismaProyecto> {
+  async updateProyecto(
+    id: string,
+    updateProyectoDto: UpdateProyectoDto,
+    user?: any,
+  ): Promise<PrismaProyecto> {
     const proyectoToUpdate = await this.findOneProyecto(id);
 
     let updatedSemaforo: Semaforo = proyectoToUpdate.semaforo;
-    if (updateProyectoDto.fechaFinEstimada || updateProyectoDto.estado || updateProyectoDto.fechaInicio) {
+    if (
+      updateProyectoDto.fechaFinEstimada ||
+      updateProyectoDto.estado ||
+      updateProyectoDto.fechaInicio
+    ) {
       updatedSemaforo = this.calculateSemaforo({
         ...proyectoToUpdate,
-        fechaInicio: updateProyectoDto.fechaInicio ? new Date(updateProyectoDto.fechaInicio) : proyectoToUpdate.fechaInicio,
-        fechaFinEstimada: updateProyectoDto.fechaFinEstimada ? new Date(updateProyectoDto.fechaFinEstimada) : proyectoToUpdate.fechaFinEstimada,
+        fechaInicio: updateProyectoDto.fechaInicio
+          ? new Date(updateProyectoDto.fechaInicio)
+          : proyectoToUpdate.fechaInicio,
+        fechaFinEstimada: updateProyectoDto.fechaFinEstimada
+          ? new Date(updateProyectoDto.fechaFinEstimada)
+          : proyectoToUpdate.fechaFinEstimada,
         estado: updateProyectoDto.estado || proyectoToUpdate.estado,
       });
     }
-
-    const responsablesAdicionalesJson = updateProyectoDto.responsablesAdicionales
-      ? JSON.stringify(updateProyectoDto.responsablesAdicionales)
-      : undefined;
 
     const updated = await this.prisma.proyecto.update({
       where: { id },
       data: {
         ...updateProyectoDto,
-        fechaInicio: updateProyectoDto.fechaInicio ? new Date(updateProyectoDto.fechaInicio) : undefined,
-        fechaFinEstimada: updateProyectoDto.fechaFinEstimada ? new Date(updateProyectoDto.fechaFinEstimada) : undefined,
-        fechaFinReal: updateProyectoDto.fechaFinReal ? new Date(updateProyectoDto.fechaFinReal) : undefined,
+        fechaInicio: updateProyectoDto.fechaInicio
+          ? new Date(updateProyectoDto.fechaInicio)
+          : undefined,
+        fechaFinEstimada: updateProyectoDto.fechaFinEstimada
+          ? new Date(updateProyectoDto.fechaFinEstimada)
+          : undefined,
+        fechaFinReal: updateProyectoDto.fechaFinReal
+          ? new Date(updateProyectoDto.fechaFinReal)
+          : undefined,
         semaforo: updatedSemaforo,
-        responsablesAdicionales: responsablesAdicionalesJson,
         fechaActualizacion: new Date().toISOString(),
       },
     });
 
-    if (updateProyectoDto.estado && updateProyectoDto.estado !== proyectoToUpdate.estado) {
-      await this.registrarHistorial(id, null, 'ESTADO_PROYECTO', proyectoToUpdate.estado, updateProyectoDto.estado);
+    if (user) {
+      await this.auditoriaService.createLog({
+        usuarioId: user.id,
+        modulo: 'OPERACIONES',
+        accion: 'ACTUALIZAR_PROYECTO',
+        detalles: { proyectoId: id, cambios: updateProyectoDto },
+      });
+    }
+
+    if (
+      updateProyectoDto.estado &&
+      updateProyectoDto.estado !== proyectoToUpdate.estado
+    ) {
+      await this.registrarHistorial(
+        id,
+        null,
+        'ESTADO_PROYECTO',
+        proyectoToUpdate.estado,
+        updateProyectoDto.estado,
+      );
     }
 
     return updated;
   }
 
-  async removeProyecto(id: string): Promise<void> {
+  async removeProyecto(id: string, user?: any): Promise<void> {
     try {
+      const proyecto = await this.prisma.proyecto.findUnique({ where: { id } });
       await this.prisma.$transaction(async (tx) => {
-        // 1. Obtener IDs de entidades relacionadas para borrado manual en cascada
-        const actividades = await tx.actividad.findMany({ where: { proyectoId: id }, select: { id: true } });
-        const actividadIds = actividades.map(a => a.id);
+        const actividades = await tx.actividad.findMany({
+          where: { proyectoId: id },
+          select: { id: true },
+        });
+        const actividadIds = actividades.map((a) => a.id);
+        const suboperaciones = await tx.suboperacion.findMany({
+          where: { proyectoId: id },
+          select: { id: true },
+        });
+        const subopIds = suboperaciones.map((s) => s.id);
+        const ingenierias = await tx.ingenieriaDiseno.findMany({
+          where: { proyectoId: id },
+          select: { id: true },
+        });
+        const ingIds = ingenierias.map((i) => i.id);
 
-        const suboperaciones = await tx.suboperacion.findMany({ where: { proyectoId: id }, select: { id: true } });
-        const subopIds = suboperaciones.map(s => s.id);
-
-        const ingenierias = await tx.ingenieriaDiseno.findMany({ where: { proyectoId: id }, select: { id: true } });
-        const ingIds = ingenierias.map(i => i.id);
-
-        // 2. Borrar dependencias de Nivel 3 (hijos de actividades, subops e ingenierias)
         if (actividadIds.length > 0) {
-           await tx.subtarea.deleteMany({ where: { actividadId: { in: actividadIds } } });
-           await tx.validacionRequerida.deleteMany({ where: { actividadId: { in: actividadIds } } });
-           // Evidencia, Comentario y HistorialCambio tienen onDelete: Cascade en la DB, pero si no funcionan, los borramos igual
-           await tx.evidencia.deleteMany({ where: { actividadId: { in: actividadIds } } });
-           await tx.comentario.deleteMany({ where: { actividadId: { in: actividadIds } } });
-           await tx.historialCambio.deleteMany({ where: { actividadId: { in: actividadIds } } });
+          await tx.subtarea.deleteMany({
+            where: { actividadId: { in: actividadIds } },
+          });
+          await tx.validacionRequerida.deleteMany({
+            where: { actividadId: { in: actividadIds } },
+          });
+          await tx.evidencia.deleteMany({
+            where: { actividadId: { in: actividadIds } },
+          });
+          await tx.comentario.deleteMany({
+            where: { actividadId: { in: actividadIds } },
+          });
+          await tx.historialCambio.deleteMany({
+            where: { actividadId: { in: actividadIds } },
+          });
         }
+        if (subopIds.length > 0)
+          await tx.entregable.deleteMany({
+            where: { suboperacionId: { in: subopIds } },
+          });
+        if (ingIds.length > 0)
+          await tx.planoDiseno.deleteMany({
+            where: { ingenieriaDisenoId: { in: ingIds } },
+          });
 
-        if (subopIds.length > 0) {
-           await tx.entregable.deleteMany({ where: { suboperacionId: { in: subopIds } } });
-        }
-
-        if (ingIds.length > 0) {
-           await tx.planoDiseno.deleteMany({ where: { ingenieriaDisenoId: { in: ingIds } } });
-        }
-
-        // 3. Borrar dependencias de Nivel 2 (relacionadas directamente al proyecto)
         await tx.actividad.deleteMany({ where: { proyectoId: id } });
         await tx.suboperacion.deleteMany({ where: { proyectoId: id } });
         await tx.ingenieriaDiseno.deleteMany({ where: { proyectoId: id } });
-        
         await tx.reporteDiario.deleteMany({ where: { proyectoId: id } });
         await tx.comentario.deleteMany({ where: { proyectoId: id } });
         await tx.evidencia.deleteMany({ where: { proyectoId: id } });
@@ -365,82 +537,265 @@ export class OperacionesService {
         await tx.expedienteTecnico.deleteMany({ where: { proyectoId: id } });
         await tx.historialCambio.deleteMany({ where: { proyectoId: id } });
         await tx.indicadorAvance.deleteMany({ where: { proyectoId: id } });
-
-        // 4. Finalmente borrar el proyecto
         await tx.proyecto.delete({ where: { id } });
       });
-    } catch (error: any) {
-      console.error("[Operaciones] Error al eliminar proyecto:", error);
-      if (error.code === 'P2025') {
-        throw new NotFoundException(`Proyecto con ID "${id}" no encontrado.`);
+
+      if (user) {
+        await this.auditoriaService.createLog({
+          usuarioId: user.id,
+          modulo: 'OPERACIONES',
+          accion: 'ELIMINAR_PROYECTO',
+          detalles: { proyectoId: id, nombre: proyecto?.nombre },
+        });
       }
+    } catch (error: any) {
+      console.error('[Operaciones] Error al eliminar proyecto:', error);
       throw error;
     }
   }
 
-  // ============================================
-  // ACTIVIDADES
-  // ============================================
+  async createActividad(
+    createActividadDto: CreateActividadDto,
+    user?: any,
+  ): Promise<any> {
+    console.log(
+      '[OperacionesService] Iniciando createActividad para proyecto:',
+      createActividadDto.proyectoId,
+    );
+    const { userRole, ...prismaData } = createActividadDto;
 
-  async createActividad(dto: CreateActividadDto): Promise<any> {
-    const { userRole, ...prismaData } = dto;
-    const actividad = await this.prisma.actividad.create({
-      data: {
-        ...prismaData,
-        fechaCreacion: new Date(dto.fechaCreacion),
-        fechaInicio: dto.fechaInicio ? new Date(dto.fechaInicio) : null,
-        fechaFin: dto.fechaFin ? new Date(dto.fechaFin) : null,
-        fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : null,
-        responsablesApoyo: JSON.stringify(dto.responsablesApoyo || []),
-      },
-    });
+    // VALIDACIÓN CRONOLÓGICA
+    const start = prismaData.fechaInicio
+      ? new Date(prismaData.fechaInicio)
+      : null;
+    const due = prismaData.fechaVencimiento
+      ? new Date(prismaData.fechaVencimiento)
+      : null;
+    const minDate = new Date('2000-01-01');
 
-    await this.registrarHistorial(dto.proyectoId, actividad.id, 'ACTIVIDAD_CREADA', '', actividad.descripcion);
-    await this.updateProjectProgress(dto.proyectoId);
-    return actividad;
+    if (start && start < minDate)
+      throw new BadRequestException(
+        'La fecha de inicio no puede ser anterior al año 2000.',
+      );
+    if (due && due < minDate)
+      throw new BadRequestException(
+        'La fecha de vencimiento no puede ser anterior al año 2000.',
+      );
+    if (start && due && due < start)
+      throw new BadRequestException(
+        'La fecha de vencimiento no puede ser anterior a la fecha de inicio.',
+      );
+
+    try {
+      const actividad = await this.prisma.actividad.create({
+        data: {
+          ...prismaData,
+          fechaCreacion: prismaData.fechaCreacion
+            ? new Date(prismaData.fechaCreacion)
+            : new Date(),
+          fechaInicio: prismaData.fechaInicio
+            ? new Date(prismaData.fechaInicio)
+            : null,
+          fechaFin: prismaData.fechaFin ? new Date(prismaData.fechaFin) : null,
+          fechaVencimiento: prismaData.fechaVencimiento
+            ? new Date(prismaData.fechaVencimiento)
+            : null,
+          responsablesApoyo: prismaData.responsablesApoyo || [],
+        },
+        include: { proyecto: true },
+      });
+
+      if (user) {
+        await this.auditoriaService.createLog({
+          usuarioId: user.id,
+          modulo: 'OPERACIONES',
+          accion: 'CREAR_ACTIVIDAD',
+          detalles: {
+            actividadId: actividad.id,
+            descripcion: actividad.descripcion,
+            proyecto: actividad.proyecto.nombre,
+          },
+        });
+      }
+
+      // TRIGGER: Notificar al Responsable de Actividad (Seguimiento Técnico)
+      const userResponsable = await this.prisma.usuario.findUnique({
+        where: { responsableId: prismaData.responsablePrincipalId },
+      });
+
+      if (userResponsable) {
+        await this.notificacionesService.create({
+          usuarioId: userResponsable.id,
+          titulo: 'Actividad asignada',
+          mensaje: `Se te asignó la actividad "${actividad.descripcion}" del proyecto ${actividad.proyecto.nombre}`,
+          tipo: 'TECNICO',
+        });
+      }
+
+      await this.registrarHistorial(
+        prismaData.proyectoId,
+        actividad.id,
+        'ACTIVIDAD_CREADA',
+        '',
+        actividad.descripcion,
+      );
+      await this.updateProjectProgress(prismaData.proyectoId);
+
+      console.log(
+        '[OperacionesService] Actividad creada exitosamente:',
+        actividad.id,
+      );
+      return actividad;
+    } catch (error) {
+      console.error('[OperacionesService] Error al crear actividad:', error);
+      throw error;
+    }
   }
 
-  async updateActividad(id: string, dto: UpdateActividadDto, userRole?: string): Promise<any> {
-    const oldActividad = await this.prisma.actividad.findUnique({ where: { id } });
-    if (!oldActividad) throw new NotFoundException(`Actividad con ID "${id}" no encontrada.`);
+  async updateActividad(
+    id: string,
+    dto: UpdateActividadDto,
+    userRole?: string,
+  ): Promise<any> {
+    const oldActividad = await this.prisma.actividad.findUnique({
+      where: { id },
+      include: { proyecto: true },
+    });
+    if (!oldActividad)
+      throw new NotFoundException(`Actividad con ID "${id}" no encontrada.`);
 
-    // Restricciones de estado 'Validada'
-    if (dto.estado === 'Validada' && userRole !== 'ADMIN') {
-      throw new Error('Solo el administrador puede validar actividades.');
+    const isAdmin = userRole === 'ADMIN';
+    const isLider =
+      dto.responsableId &&
+      oldActividad.proyecto.responsablePrincipalId === dto.responsableId;
+
+    console.log(`[updateActividad] ID: ${id}, Role: ${userRole}, isAdmin: ${isAdmin}, isLider: ${isLider}`);
+
+    if (dto.estado === 'Validada' && !isAdmin && !isLider) {
+      console.error(`[updateActividad] Permission Denied: User is not ADMIN or Project Leader`);
+      throw new Error(
+        'Solo el administrador o el Jefe de Proyecto pueden validar actividades.',
+      );
+    }
+    
+    if (oldActividad.estado === 'Validada' && !isAdmin && !isLider) {
+      console.error(`[updateActividad] Locked: Activity is already validated and user is not ADMIN or Project Leader`);
+      throw new Error('Actividad bloqueada por validación.');
     }
 
-    // Si la actividad ya está validada, solo el admin puede tocarla
-    if (oldActividad.estado === 'Validada' && userRole !== 'ADMIN') {
-      throw new Error('Esta actividad ya ha sido validada y está bloqueada. Contacte al administrador.');
-    }
-
-    // Calcular progreso automático basado en el estado si se cambia el estado
     let nuevoProgreso = dto.progreso;
+    let nuevoEstado = dto.estado;
+
+    // LÓGICA DE ESTADOS AUTOMÁTICOS POR PROGRESO
+    if (nuevoProgreso !== undefined) {
+      if (nuevoProgreso === 0) {
+        nuevoEstado = 'Pendiente';
+      } else if (nuevoProgreso > 0 && nuevoProgreso < 100) {
+        if (oldActividad.estado !== 'Validada') {
+          nuevoEstado = 'EnProgreso';
+        }
+      } else if (nuevoProgreso === 100) {
+        // Si llega al 100% y no estaba validada, pasa a Completada (esperando validación)
+        if (oldActividad.estado !== 'Validada') {
+          nuevoEstado = 'Completada';
+        }
+      }
+    }
+
+    // LÓGICA DE PROGRESO POR ESTADO
     if (dto.estado && dto.estado !== oldActividad.estado) {
       if (dto.estado === 'Pendiente') nuevoProgreso = 0;
-      else if (dto.estado === 'EnProgreso') nuevoProgreso = 50;
-      else if (dto.estado === 'Completada' || dto.estado === 'Validada') nuevoProgreso = 100;
+      else if (
+        dto.estado === 'EnProgreso' &&
+        (oldActividad.progreso === 0 || oldActividad.progreso === 100)
+      )
+        nuevoProgreso = 50;
+      else if (dto.estado === 'Completada' || dto.estado === 'Validada')
+        nuevoProgreso = 100;
     }
 
     const { userRole: _, ...prismaData } = dto;
-
     const updated = await this.prisma.actividad.update({
       where: { id },
       data: {
         ...prismaData,
-        progreso: nuevoProgreso !== undefined ? nuevoProgreso : oldActividad.progreso,
+        estado: nuevoEstado || undefined,
+        progreso:
+          nuevoProgreso !== undefined ? nuevoProgreso : oldActividad.progreso,
         fechaInicio: dto.fechaInicio ? new Date(dto.fechaInicio) : undefined,
-        fechaFin: dto.fechaFin ? new Date(dto.fechaFin) : undefined,
-        fechaVencimiento: dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : undefined,
-        responsablesApoyo: dto.responsablesApoyo ? JSON.stringify(dto.responsablesApoyo) : undefined,
+        fechaFin:
+          nuevoEstado === 'Completada' || nuevoEstado === 'Validada'
+            ? new Date()
+            : dto.fechaFin
+              ? new Date(dto.fechaFin)
+              : undefined,
+        fechaVencimiento: dto.fechaVencimiento
+          ? new Date(dto.fechaVencimiento)
+          : undefined,
+        responsablesApoyo: dto.responsablesApoyo || undefined,
       },
+      include: { proyecto: true },
     });
 
-    if (dto.estado && dto.estado !== oldActividad.estado) {
-      await this.registrarHistorial(oldActividad.proyectoId, id, 'ESTADO_ACTIVIDAD', oldActividad.estado, dto.estado);
-      await this.updateProjectProgress(oldActividad.proyectoId);
+    // TRIGGER: Notificar si fue Validada o Observada (Rechazada)
+    if (updated.estado === 'Validada' && oldActividad.estado !== 'Validada') {
+      const userResp = await this.prisma.usuario.findUnique({
+        where: { responsableId: updated.responsablePrincipalId },
+      });
+      if (userResp) {
+        await this.notificacionesService.create({
+          usuarioId: userResp.id,
+          titulo: 'Actividad Validada',
+          mensaje: `Tu actividad "${updated.descripcion}" ha sido validada y finalizada correctamente.`,
+          tipo: 'SISTEMA',
+        });
+      }
     }
 
+    if (dto.estado === 'EnProgreso' && oldActividad.estado === 'Completada') {
+      // Esto significa que fue rechazada/observada desde la bandeja de validación
+      const userResp = await this.prisma.usuario.findUnique({
+        where: { responsableId: updated.responsablePrincipalId },
+      });
+      if (userResp) {
+        await this.notificacionesService.create({
+          usuarioId: userResp.id,
+          titulo: 'Actividad Observada',
+          mensaje: `Se requiere revisar la actividad "${updated.descripcion}". Motivo: ${dto.observaciones || 'No especificado'}.`,
+          tipo: 'SISTEMA',
+        });
+      }
+    }
+
+    // TRIGGER: Notificar al Proyecto cuando una tarea se completa
+    if (
+      (updated.estado === 'Completada' || updated.estado === 'Validada') &&
+      oldActividad.estado !== 'Completada' &&
+      oldActividad.estado !== 'Validada'
+    ) {
+      const principal = await this.prisma.usuario.findUnique({
+        where: { responsableId: updated.proyecto.responsablePrincipalId },
+      });
+      if (principal) {
+        await this.notificacionesService.create({
+          usuarioId: principal.id,
+          titulo: 'Tarea Finalizada',
+          mensaje: `La actividad "${updated.descripcion}" del proyecto ${updated.proyecto.nombre} ha sido marcada como ${updated.estado}.`,
+          tipo: 'SISTEMA',
+        });
+      }
+    }
+
+    if (dto.estado && dto.estado !== oldActividad.estado) {
+      await this.registrarHistorial(
+        oldActividad.proyectoId,
+        id,
+        'ESTADO_ACTIVIDAD',
+        oldActividad.estado,
+        dto.estado,
+      );
+      await this.updateProjectProgress(oldActividad.proyectoId);
+    }
     return updated;
   }
 
@@ -452,16 +807,66 @@ export class OperacionesService {
     }
   }
 
-  // ============================================
-  // SUBTAREAS
-  // ============================================
+  async findAllActividades(
+    page: number = 1,
+    limit: number = 20,
+    filters: any = {},
+    user?: any,
+  ) {
+    const skip = (page - 1) * limit;
+    const where: any = {};
+    if (filters.proyectoId) where.proyectoId = filters.proyectoId;
+    if (filters.estado && filters.estado !== 'all')
+      where.estado = filters.estado;
+    if (filters.responsableId && filters.responsableId !== 'all')
+      where.responsablePrincipalId = filters.responsableId;
+    if (filters.search) {
+      where.OR = [
+        { descripcion: { contains: filters.search } },
+        { proyecto: { codigo: { contains: filters.search } } },
+        { proyecto: { nombre: { contains: filters.search } } },
+      ];
+    }
+
+    // FILTRO POR ROL
+    if (user && user.rol !== 'ADMIN') {
+      const responsableId = user.responsable?.id;
+      if (responsableId) {
+        where.responsablePrincipalId = responsableId;
+      } else {
+        where.responsablePrincipalId = 'NONE';
+      }
+    }
+
+    console.log(
+      `[OperacionesService] Buscando actividades para usuario ${user?.username} (${user?.rol}). Filtros:`,
+      where,
+    );
+
+    const [data, total] = await Promise.all([
+      this.prisma.actividad.findMany({
+        where,
+        include: {
+          proyecto: { select: { codigo: true, nombre: true } },
+          responsablePrincipal: true,
+          subtareas: true,
+          validacionesRequeridas: true,
+        },
+        orderBy: { fechaCreacion: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.actividad.count({ where }),
+    ]);
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
 
   async createSubtarea(data: any): Promise<any> {
     const subtarea = await this.prisma.subtarea.create({ data });
-    const actividad = await this.prisma.actividad.findUnique({ where: { id: data.actividadId } });
-    if (actividad) {
-      await this.recalculateActivityProgress(actividad.id);
-    }
+    const actividad = await this.prisma.actividad.findUnique({
+      where: { id: data.actividadId },
+    });
+    if (actividad) await this.recalculateActivityProgress(actividad.id);
     return subtarea;
   }
 
@@ -471,58 +876,339 @@ export class OperacionesService {
     return subtarea;
   }
 
-  // ============================================
-  // VALIDACIONES
-  // ============================================
-
   async updateValidacion(id: string, data: any): Promise<any> {
     const validacion = await this.prisma.validacionRequerida.update({
       where: { id },
       data: {
         ...data,
-        fechaValidacion: data.fechaValidacion ? new Date(data.fechaValidacion) : undefined,
+        fechaValidacion: data.fechaValidacion
+          ? new Date(data.fechaValidacion)
+          : undefined,
       },
     });
-
-    // If approved, check if all validations are approved to update activity state
     if (data.estado === 'Aprobada' || data.estado === 'Rechazada') {
       const activity = await this.prisma.actividad.findUnique({
-        where: { id: validacion.actividadId }
+        where: { id: validacion.actividadId },
       });
       if (activity) {
         await this.registrarHistorial(
-          activity.proyectoId, 
-          activity.id, 
-          data.estado === 'Aprobada' ? 'VALIDACION_APROBADA' : 'VALIDACION_RECHAZADA', 
-          validacion.tipo, 
-          data.observaciones || 'Sin observaciones'
+          activity.proyectoId,
+          activity.id,
+          data.estado === 'Aprobada'
+            ? 'VALIDACION_APROBADA'
+            : 'VALIDACION_RECHAZADA',
+          validacion.tipo,
+          data.observaciones || 'Sin observaciones',
         );
       }
-
       if (data.estado === 'Aprobada') {
-        const activityWithValidations = await this.prisma.actividad.findUnique({
+        const activityWithVal = await this.prisma.actividad.findUnique({
           where: { id: validacion.actividadId },
-          include: { validacionesRequeridas: true }
+          include: { validacionesRequeridas: true },
         });
-        if (activityWithValidations && activityWithValidations.validacionesRequeridas.every(v => v.estado === 'Aprobada')) {
+        if (
+          activityWithVal &&
+          activityWithVal.validacionesRequeridas.every(
+            (v) => v.estado === 'Aprobada',
+          )
+        ) {
           await this.prisma.actividad.update({
-            where: { id: activityWithValidations.id },
-            data: { estado: 'Validada' }
+            where: { id: activityWithVal.id },
+            data: { estado: 'Validada' },
           });
-          await this.registrarHistorial(activityWithValidations.proyectoId, activityWithValidations.id, 'ESTADO_ACTIVIDAD', activityWithValidations.estado, 'Validada');
-          await this.updateProjectProgress(activityWithValidations.proyectoId);
+          await this.registrarHistorial(
+            activityWithVal.proyectoId,
+            activityWithVal.id,
+            'ESTADO_ACTIVIDAD',
+            activityWithVal.estado,
+            'Validada',
+          );
+          await this.updateProjectProgress(activityWithVal.proyectoId);
         }
       }
     }
-
     return validacion;
   }
 
-  // ============================================
-  // UTILS
-  // ============================================
+  async createFichaTecnica(dto: any, user?: any) {
+    // RESTRICCIÓN: Un cliente solo puede tener UNA visita técnica activa a la vez.
+    // Estados activos: PENDIENTE, PROGRAMADA, EN_PROCESO
+    const activeStates = ['PENDIENTE', 'PROGRAMADA', 'EN_PROCESO'];
 
-  private async registrarHistorial(proyectoId: string, actividadId: string | null, campo: string, valorAnterior: string, valorNuevo: string) {
+    const clientHasActiveVisit = await this.prisma.fichaTecnica.findFirst({
+      where: {
+        clienteId: dto.clienteId,
+        estado: { in: activeStates },
+      },
+      include: { cliente: true, tecnico: true },
+    });
+
+    if (clientHasActiveVisit) {
+      throw new BadRequestException({
+        error: 'Cliente con Visita Activa',
+        message: `El cliente ${clientHasActiveVisit.cliente.empresa} ya tiene una visita técnica activa (${clientHasActiveVisit.estado}) asignada al técnico ${clientHasActiveVisit.tecnico.nombre}. Debe finalizarla (Marcar como COMPLETADA) antes de registrar una nueva.`,
+      });
+    }
+
+    const ficha = await this.prisma.fichaTecnica.create({
+      data: {
+        clienteId: dto.clienteId,
+        tecnicoId: dto.tecnicoId,
+        fechaVisita: new Date(dto.fechaVisita),
+        observaciones: dto.observaciones,
+        hallazgos: dto.hallazgos,
+        recomendaciones: dto.recomendaciones,
+        estado: dto.estado || 'PENDIENTE',
+        firmaTecnico: dto.firmaTecnico,
+        adjuntos: {
+          create:
+            dto.adjuntos?.map((adj: any) => ({
+              nombre: adj.nombre,
+              url: adj.url,
+              tipo: adj.tipo,
+            })) || [],
+        },
+      },
+      include: { adjuntos: true, cliente: true, tecnico: true },
+    });
+
+    if (user) {
+      await this.auditoriaService.createLog({
+        usuarioId: user.id,
+        modulo: 'OPERACIONES',
+        accion: 'CREAR_FICHA_TECNICA',
+        detalles: { fichaId: ficha.id, cliente: ficha.cliente.empresa },
+      });
+    }
+
+    // REGISTRAR EN BITÁCORA DE SEGUIMIENTO (CRM)
+    try {
+      const fechaVisita = new Date(ficha.fechaVisita);
+      const dia = String(fechaVisita.getDate()).padStart(2, '0');
+      const mes = String(fechaVisita.getMonth() + 1).padStart(2, '0');
+      const anio = fechaVisita.getFullYear();
+      const hora = String(fechaVisita.getHours()).padStart(2, '0');
+      const min = String(fechaVisita.getMinutes()).padStart(2, '0');
+      const fechaFmt = `${dia}/${mes}/${anio} ${hora}:${min}`;
+
+      await this.prisma.interaccion.create({
+        data: {
+          clientId: ficha.clienteId,
+          fecha: new Date(),
+          tipo: 'Visita',
+          accion: 'Visita Técnica Programada',
+          observaciones: `Se programó una visita técnica para el ${fechaFmt}. Técnico asignado: ${ficha.tecnico.nombre}. Notas: ${ficha.observaciones || 'Sin observaciones'}`,
+          usuario: user?.nombre || 'SISTEMA',
+        },
+      });
+      console.log(`[Operaciones] Bitácora CRM actualizada (Programación) para cliente ${ficha.clienteId}`);
+    } catch (error) {
+      console.error('[Operaciones] Error al registrar bitácora CRM (Programación):', error.message);
+    }
+
+    // TRIGGER: Notificar al Técnico Asignado (Seguimiento Técnico)
+    const userTecnico = await this.prisma.usuario.findUnique({
+      where: { responsableId: dto.tecnicoId },
+    });
+
+    if (userTecnico) {
+      const fechaFormateada = new Date(ficha.fechaVisita).toLocaleString('es-PE', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      await this.notificacionesService.create({
+        usuarioId: userTecnico.id,
+        titulo: 'Seguimiento Técnico Asignado',
+        mensaje: `Se ha registrado una visita técnica para el cliente ${ficha.cliente.empresa}. Programada para: ${fechaFormateada}. Por favor, revise su bandeja técnica.`,
+        tipo: 'TECNICO',
+        fechaProgramada: ficha.fechaVisita,
+      });
+      console.log(
+        `[Operaciones] Notificación enviada a técnico ${userTecnico.nombre} (ID: ${userTecnico.id})`,
+      );
+    } else {
+      console.warn(
+        `[Operaciones] No se encontró usuario para el responsable técnico ID: ${dto.tecnicoId}`,
+      );
+    }
+
+    return ficha;
+  }
+
+  async findAllFichas(
+    page: number = 1,
+    limit: number = 20,
+    filters: any = {},
+    user?: any,
+  ) {
+    // PROTECCIÓN: Evitar NaN si el frontend envía basura en los parámetros
+    const safePage = isNaN(page) || page < 1 ? 1 : page;
+    const safeLimit = isNaN(limit) || limit < 1 ? 20 : limit;
+
+    const skip = (safePage - 1) * safeLimit;
+    
+    // Construcción robusta del objeto where
+    let where: any = {};
+    
+    if (typeof filters === 'string') {
+      where.tecnicoId = filters;
+    } else if (filters && typeof filters === 'object') {
+      where = { ...filters };
+    }
+
+    if (filters.search) {
+      const search = filters.search;
+      where.OR = [
+        { cliente: { empresa: { contains: search } } },
+        { cliente: { ruc: { contains: search } } },
+        { tecnico: { nombre: { contains: search } } },
+      ];
+      delete where.search;
+    }
+
+    // Filtro por Fecha
+    if (filters.startDate || filters.endDate) {
+      where.fechaVisita = {};
+      if (filters.startDate) {
+        // Usar inicio del día local
+        where.fechaVisita.gte = new Date(filters.startDate + 'T00:00:00');
+      }
+      if (filters.endDate) {
+        // Usar fin del día local
+        where.fechaVisita.lte = new Date(filters.endDate + 'T23:59:59');
+      }
+      delete where.startDate;
+      delete where.endDate;
+    }
+
+    // FILTRO POR ROL: Si no es ADMIN ni SUPERVISOR, forzamos que solo vea lo suyo
+    if (user && user.rol !== 'ADMIN' && user.rol !== 'SUPERVISOR') {
+      const responsableId = user.responsable?.id;
+      if (responsableId) {
+        where.tecnicoId = responsableId;
+      } else {
+        // Si no tiene responsable vinculado y no es Admin/Supervisor, no debería ver nada
+        where.tecnicoId = 'NONE';
+      }
+    } else if (user && (user.rol === 'ADMIN' || user.rol === 'SUPERVISOR') && filters.tecnicoId) {
+       // Si es ADMIN/SUPERVISOR y filtró por un técnico específico, lo respetamos
+       where.tecnicoId = filters.tecnicoId;
+    }
+
+    const [data, total, pending, completed] = await Promise.all([
+      this.prisma.fichaTecnica.findMany({
+        where,
+        include: { cliente: true, tecnico: true, adjuntos: true },
+        orderBy: { fechaVisita: 'desc' },
+        skip,
+        take: safeLimit,
+      }),
+      this.prisma.fichaTecnica.count({ where }),
+      this.prisma.fichaTecnica.count({
+        where: { ...where, estado: 'PENDIENTE' },
+      }),
+      this.prisma.fichaTecnica.count({
+        where: { ...where, estado: 'COMPLETADA' },
+      }),
+    ]);
+    return {
+      data,
+      total,
+      page: safePage,
+      limit: safeLimit,
+      totalPages: Math.ceil(total / safeLimit),
+      stats: { pending, completed },
+    };
+  }
+
+  async updateFicha(id: string, dto: any, user?: any) {
+    const { adjuntos, datosTecnicos, ...rest } = dto;
+    const data: any = {
+      ...rest,
+      fechaVisita: dto.fechaVisita ? new Date(dto.fechaVisita) : undefined,
+    };
+    if (datosTecnicos !== undefined) data.datosTecnicos = datosTecnicos;
+    if (adjuntos && Array.isArray(adjuntos)) {
+      await this.prisma.fichaTecnicaAdjunto.deleteMany({
+        where: { fichaTecnicaId: id },
+      });
+      data.adjuntos = {
+        create: adjuntos.map((a: any) => ({
+          nombre: a.nombre,
+          url: a.url,
+          tipo: a.tipo || 'Documento',
+        })),
+      };
+    }
+    const updatedFicha = await this.prisma.fichaTecnica.update({
+      where: { id },
+      data,
+      include: { adjuntos: true, cliente: true },
+    });
+
+    if (user) {
+      await this.auditoriaService.createLog({
+        usuarioId: user.id,
+        modulo: 'OPERACIONES',
+        accion: 'ACTUALIZAR_FICHA_TECNICA',
+        detalles: { fichaId: id, cliente: updatedFicha.cliente.empresa },
+      });
+    }
+
+    // TRIGGER: Notificar al asesor comercial cuando se completa la ficha
+    if (dto.estado === 'COMPLETADA') {
+      const asesor = await this.prisma.usuario.findFirst({
+        where: { responsable: { nombre: updatedFicha.cliente.asignadoA } },
+      });
+      if (asesor) {
+        await this.notificacionesService.create({
+          usuarioId: asesor.id,
+          titulo: 'Inspección Finalizada',
+          mensaje: `El técnico ha completado la ficha técnica del cliente ${updatedFicha.cliente.empresa}. Ya puede proceder con la cotización.`,
+          tipo: 'VISITA',
+        });
+      }
+
+      // REGISTRAR EN BITÁCORA DE SEGUIMIENTO (CRM)
+      try {
+        await this.prisma.interaccion.create({
+          data: {
+            clientId: updatedFicha.clienteId,
+            fecha: new Date(),
+            tipo: 'Visita',
+            accion: 'Inspección Finalizada',
+            observaciones: `El equipo técnico ha finalizado la inspección en campo para ${updatedFicha.cliente.empresa}. Hallazgos y recomendaciones sincronizados.`,
+            usuario: user?.nombre || 'TÉCNICO DE CAMPO',
+          },
+        });
+        console.log(`[Operaciones] Bitácora CRM actualizada (Finalización) para cliente ${updatedFicha.clienteId}`);
+        
+        // Actualizar etapa comercial del cliente a "Inspección Realizada"
+        await this.prisma.cliente.update({
+          where: { id: updatedFicha.clienteId },
+          data: { 
+            etapaComercial: 'Inspección Realizada',
+            ultimoContacto: new Date()
+          }
+        });
+      } catch (error) {
+        console.error('[Operaciones] Error al registrar bitácora CRM (Finalización):', error.message);
+      }
+    }
+    return updatedFicha;
+  }
+
+  private async registrarHistorial(
+    proyectoId: string,
+    actividadId: string | null,
+    campo: string,
+    valorAnterior: string,
+    valorNuevo: string,
+  ) {
     await this.prisma.historialCambio.create({
       data: {
         proyectoId,
@@ -532,88 +1218,103 @@ export class OperacionesService {
         valorNuevo: String(valorNuevo),
         usuario: 'Sistema',
         area: 'OperacionesDeCampo',
-        fecha: new Date(), // Esto ya guarda la hora real (UTC) en la DB
-      }
+        fecha: new Date(),
+      },
     });
   }
 
   private async recalculateActivityProgress(actividadId: string) {
-    const subtareas = await this.prisma.subtarea.findMany({ where: { actividadId } });
+    const subtareas = await this.prisma.subtarea.findMany({
+      where: { actividadId },
+    });
     if (subtareas.length === 0) return;
-
-    const completadas = subtareas.filter(s => s.completada).length;
+    const completadas = subtareas.filter((s) => s.completada).length;
     const progreso = Math.round((completadas / subtareas.length) * 100);
-    
     let estado: EstadoActividad = EstadoActividad.Pendiente;
     if (progreso === 100) estado = EstadoActividad.Completada;
     else if (progreso > 0) estado = EstadoActividad.EnProgreso;
-
     const actividad = await this.prisma.actividad.update({
       where: { id: actividadId },
-      data: { progreso, estado }
+      data: { progreso, estado },
     });
-
     await this.updateProjectProgress(actividad.proyectoId);
   }
 
   private async updateProjectProgress(proyectoId: string) {
-    const actividades = await this.prisma.actividad.findMany({ where: { proyectoId } });
+    const actividades = await this.prisma.actividad.findMany({
+      where: { proyectoId },
+    });
     if (actividades.length === 0) return;
-
-    const totalPeso = actividades.reduce((acc, a) => acc + (a.ponderacion || 1), 0);
+    const totalPeso = actividades.reduce(
+      (acc, a) => acc + (a.ponderacion || 1),
+      0,
+    );
     const pesosCompletados = actividades
-      .filter(a => a.estado === 'Completada' || a.estado === 'Validada')
+      .filter((a) => a.estado === 'Completada' || a.estado === 'Validada')
       .reduce((acc, a) => acc + (a.ponderacion || 1), 0);
-    
-    const avance = totalPeso > 0 ? Math.round((pesosCompletados / totalPeso) * 100) : 0;
-
+    const avance =
+      totalPeso > 0 ? Math.round((pesosCompletados / totalPeso) * 100) : 0;
     await this.prisma.proyecto.update({
       where: { id: proyectoId },
-      data: { avance, avanceCalculado: avance }
+      data: { avance, avanceCalculado: avance },
     });
   }
 
   async createResponsable(data: any): Promise<PrismaResponsable> {
     return this.prisma.responsable.create({ data });
   }
-
   async updateResponsable(id: string, data: any): Promise<PrismaResponsable> {
     return this.prisma.responsable.update({ where: { id }, data });
   }
-
   async findAllResponsables(): Promise<PrismaResponsable[]> {
     return this.prisma.responsable.findMany();
   }
-
   async findOneResponsable(id: string): Promise<PrismaResponsable> {
-    const responsable = await this.prisma.responsable.findUnique({ where: { id } });
-    if (!responsable) {
+    const responsable = await this.prisma.responsable.findUnique({
+      where: { id },
+    });
+    if (!responsable)
       throw new NotFoundException(`Responsable con ID "${id}" no encontrado.`);
-    }
     return responsable;
   }
-
   private async generateProjectCode(): Promise<string> {
     const year = new Date().getFullYear();
-    const count = await this.prisma.proyecto.count(); // Get count from DB
-    return `HHT-OPE-${year.toString().slice(-2)}-${(count + 1).toString().padStart(3, '0')}`;
-  }
+    const prefix = `HHT-OPE-${year.toString().slice(-2)}-`;
+    const count = await this.prisma.proyecto.count();
+    let nextNumber = count + 1;
+    let code = `${prefix}${nextNumber.toString().padStart(3, '0')}`;
 
-  private calculateSemaforo(proyecto: Partial<PrismaProyecto | CreateProyectoDto>): Semaforo {
+    // Verificar colisiones y aumentar el número hasta que sea único
+    let exists = await this.prisma.proyecto.findUnique({
+      where: { codigo: code },
+    });
+
+    while (exists) {
+      nextNumber++;
+      code = `${prefix}${nextNumber.toString().padStart(3, '0')}`;
+      exists = await this.prisma.proyecto.findUnique({
+        where: { codigo: code },
+      });
+    }
+
+    return code;
+  }
+  private calculateSemaforo(
+    proyecto: Partial<PrismaProyecto | CreateProyectoDto>,
+  ): Semaforo {
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
-
     if (proyecto.estado === EstadoProyecto.Finalizado) return Semaforo.Verde;
     if (proyecto.estado === EstadoProyecto.Detenido) return Semaforo.Rojo;
-
-    const fechaFin = proyecto.fechaFinEstimada ? new Date(proyecto.fechaFinEstimada as string | Date) : null;
+    const fechaFin = proyecto.fechaFinEstimada
+      ? new Date(proyecto.fechaFinEstimada)
+      : null;
     if (!fechaFin) return Semaforo.Amarillo;
-
-    const diasRestantes = Math.ceil((fechaFin.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
-
+    const diasRestantes = Math.ceil(
+      (fechaFin.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24),
+    );
     if (diasRestantes < 3) return Semaforo.Rojo;
     if (diasRestantes <= 7) return Semaforo.Amarillo;
     return Semaforo.Verde;
   }
 }
-

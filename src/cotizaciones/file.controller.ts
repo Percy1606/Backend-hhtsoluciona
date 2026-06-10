@@ -18,16 +18,16 @@ export class FileController {
     }
 
     const ext = filename.split('.').pop()?.toLowerCase();
-    
+
     // Mapeo manual de tipos MIME para asegurar la previsualización
     const mimeTypes: { [key: string]: string } = {
-      'pdf': 'application/pdf',
-      'png': 'image/png',
-      'jpg': 'image/jpeg',
-      'jpeg': 'image/jpeg',
-      'webp': 'image/webp',
-      'gif': 'image/gif',
-      'txt': 'text/plain'
+      pdf: 'application/pdf',
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      webp: 'image/webp',
+      gif: 'image/gif',
+      txt: 'text/plain',
     };
 
     const contentType = mimeTypes[ext || ''] || 'application/octet-stream';
@@ -38,11 +38,14 @@ export class FileController {
 
     // HEADERS CRÍTICOS PARA PREVISUALIZACIÓN
     res.setHeader('Content-Type', contentType);
-    
+
     if (['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext || '')) {
       res.setHeader('Content-Disposition', 'inline');
     } else {
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${filename}"`,
+      );
     }
 
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');

@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -21,9 +25,9 @@ export class ConfigService {
           responsable: true,
         },
       });
-      
+
       // Ensure modulos is always an array
-      return users.map(user => {
+      return users.map((user) => {
         let modulos = user.modulos;
         if (typeof modulos === 'string') {
           try {
@@ -51,8 +55,38 @@ export class ConfigService {
       where: { id },
       include: { responsable: true },
     });
-    if (!user) throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
+    if (!user)
+      throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
     return user;
+  }
+
+  async getOnlineUsers() {
+    // Definimos "en línea" como usuarios que tuvieron actividad en los últimos 5 minutos
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+
+    const onlineUsers = await this.prisma.usuario.findMany({
+      where: {
+        ultimaActividad: {
+          gte: fiveMinutesAgo,
+        },
+        activo: true,
+      },
+      select: {
+        id: true,
+        nombre: true,
+        username: true,
+        rol: true,
+        responsable: {
+          select: {
+            color: true,
+            area: true,
+            cargo: true
+          }
+        }
+      },
+    });
+
+    return onlineUsers;
   }
 
   async createUser(dto: CreateUserDto) {
@@ -74,18 +108,23 @@ export class ConfigService {
   }
 
   async updateUser(id: string, dto: UpdateUserDto) {
-    const user = await this.findOneUser(id);
+    await this.findOneUser(id);
 
-    if (dto.password) {
-      dto.password = await bcrypt.hash(dto.password, 10);
+    const { password, ...data } = dto;
+    const updateData: any = { ...data };
+
+    if (password && password.trim() !== '') {
+      updateData.password = await bcrypt.hash(password, 10);
+    }
+
+    // Asegurar que modulos se maneje correctamente si viene en el DTO
+    if (dto.modulos !== undefined) {
+      updateData.modulos = dto.modulos;
     }
 
     return this.prisma.usuario.update({
       where: { id },
-      data: {
-        ...dto,
-        modulos: dto.modulos !== undefined ? dto.modulos : undefined,
-      },
+      data: updateData,
     });
   }
 
@@ -112,7 +151,8 @@ export class ConfigService {
       where: { id },
       include: { usuario: true },
     });
-    if (!worker) throw new NotFoundException(`Trabajador con ID ${id} no encontrado`);
+    if (!worker)
+      throw new NotFoundException(`Trabajador con ID ${id} no encontrado`);
     return worker;
   }
 

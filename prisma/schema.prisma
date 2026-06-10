@@ -84,51 +84,185 @@ enum EstadoDocumento {
   Obsoleto
 }
 
+enum TipoCliente {
+  PROSPECTO
+  CLIENTE
+  CLIENTE_INACTIVO
+}
+
+enum ClasificacionCliente {
+  MUY_RENTABLE
+  RENTABLE
+  POCO_RENTABLE
+}
+
+enum TipoActividadComercial {
+  LLAMADA
+  CORREO
+  WHATSAPP
+  REUNION
+  VISITA_TECNICA
+  COTIZACION
+  SEGUIMIENTO
+}
+
+enum EstadoActividadComercial {
+  PENDIENTE
+  COMPLETADA
+  CANCELADA
+}
+
+enum TipoNotificacion {
+  SEGUIMIENTO
+  VISITA
+  COTIZACION
+  CLIENTE
+  SISTEMA
+  TECNICO
+}
+
 // ============================================
 // MODELS
 // ============================================
 
 model Cliente {
-  id                  String         @id @default(uuid())
-  codigo              String         @unique
+  id                  String               @id @default(uuid())
+  codigo              String               @unique
   empresa             String
-  ruc                 String         @unique
+  ruc                 String               @unique
   direccion           String
-  tarifa              String         // MT3 | MT4
+  tarifa              String               // MT3 | MT4
   contacto            String
   telefono            String?
   cargo               String?
   correo              String?
+  linkedin            String?
+  cartera             String?
   asignadoA           String
+  responsableId       String?
+  responsable         Responsable?         @relation("ResponsableClientes", fields: [responsableId], references: [id])
   diaTrabajo          String?
   estado              String
-  prioridad           String         // Baja | Media | Alta | Critica
+  prioridad           String               // Baja | Media | Alta | Critica
   accion              String
   ultimoContacto      DateTime?
   proximoSeguimiento  DateTime?
-  observaciones       String?        @db.Text
+  observaciones       String?              @db.Text
   zona                String
-  semaforo            String         // Verde | Amarillo | Rojo
-  temperatura         String         // Frio | Tibio | Caliente | Muy Caliente
-  montoEstimado       Float          @default(0)
-  probabilidad        Float          @default(0)
-  ventaProyectada     Float          @default(0)
-  tipoCliente         String?
+  semaforo            String               // Verde | Amarillo | Rojo
+  temperatura         String               // Frio | Tibio | Caliente | Muy Caliente
+  montoEstimado       Float                @default(0)
+  probabilidad        Float                @default(0)
+  ventaProyectada     Float                @default(0)
+  tipoCliente         TipoCliente          @default(PROSPECTO)
+  clasificacion       ClasificacionCliente @default(RENTABLE)
+  esClienteReal       Boolean              @default(false)
   etapaComercial      String
   
   interacciones       Interaccion[]
-  proyectos           Proyecto[]     @relation("ClienteProyectos")
-  documentos          Documento[]    @relation("ClienteDocumentos")
-  cotizaciones        Cotizacion[]   @relation("ClienteCotizaciones")
+  actividadesComerciales ActividadComercial[]
+  fichasTecnicas      FichaTecnica[]
+  proyectos           Proyecto[]           @relation("ClienteProyectos")
+  documentos          Documento[]          @relation("ClienteDocumentos")
+  cotizaciones        Cotizacion[]         @relation("ClienteCotizaciones")
+  facturas            Factura[]            @relation("ClienteFacturas")
   
-  hallazgosTecnicos   Json?          @default("[]")
-  solucionesPropuestas Json?         @default("[]")
+  hallazgosTecnicos   Json?
+  solucionesPropuestas Json?
   propuestaTecnicaUrl String?
 
-  fechaCreacion       DateTime       @default(now())
-  fechaActualizacion  DateTime?      @updatedAt
+  deletedAt           DateTime?
+  fechaCreacion       DateTime             @default(now())
+  fechaActualizacion  DateTime?            @updatedAt
 
+  @@index([empresa])
+  @@index([ruc])
+  @@index([zona])
   @@map("CLIENTE")
+}
+
+model ActividadComercial {
+  id                 String                  @id @default(uuid())
+  clienteId          String
+  cliente            Cliente                 @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  usuarioId          String
+  tipoActividad      TipoActividadComercial
+  descripcion        String                  @db.Text
+  fechaActividad     DateTime                @default(now())
+  proximoSeguimiento DateTime?
+  estado             EstadoActividadComercial @default(PENDIENTE)
+  
+  notificaciones     Notificacion[]
+  
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  @@map("ACTIVIDAD_COMERCIAL")
+}
+
+model Notificacion {
+  id                   String            @id @default(uuid())
+  usuarioId            String?
+  titulo               String
+  mensaje              String            @db.Text
+  tipo                 TipoNotificacion
+  leida                Boolean           @default(false)
+  esGlobal             Boolean           @default(false)
+  fechaProgramada      DateTime?
+  actividadComercialId String?
+  actividadComercial   ActividadComercial? @relation(fields: [actividadComercialId], references: [id], onDelete: SetNull)
+  
+  createdAt            DateTime          @default(now())
+
+  @@map("NOTIFICACION")
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  usuarioId     String
+  usuario       Usuario  @relation(fields: [usuarioId], references: [id])
+  modulo        String
+  accion        String
+  detalles      Json?
+  ip            String?
+  fechaCreacion DateTime @default(now())
+
+  @@map("AUDIT_LOG")
+}
+
+model FichaTecnica {
+  id            String                @id @default(uuid())
+  clienteId     String
+  cliente       Cliente               @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  tecnicoId     String
+  tecnico       Responsable           @relation(fields: [tecnicoId], references: [id])
+  fechaVisita   DateTime
+  observaciones String?               @db.Text
+  hallazgos     String?               @db.Text
+  recomendaciones String?             @db.Text
+  estado        String                // PENDIENTE | COMPLETADA | OBSERVADA
+  firmaTecnico  String?               @db.Text // Base64 or URL
+  
+  datosTecnicos Json?                 @default("{}")
+  adjuntos      FichaTecnicaAdjunto[]
+  
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  @@map("FICHA_TECNICA")
+}
+
+model FichaTecnicaAdjunto {
+  id             String       @id @default(uuid())
+  fichaTecnicaId String
+  fichaTecnica   FichaTecnica @relation(fields: [fichaTecnicaId], references: [id], onDelete: Cascade)
+  nombre         String
+  url            String
+  tipo           String       // Imagen | PDF | Documento
+  
+  createdAt      DateTime     @default(now())
+
+  @@map("FICHA_TECNICA_ADJUNTO")
 }
 
 model Interaccion {
@@ -171,6 +305,7 @@ model Cotizacion {
 
   documentos        Documento[]  @relation("CotizacionDocumentos")
   interacciones     Interaccion[]
+  facturas          Factura[]    @relation("CotizacionFacturas")
   
   proyectoGeneradoId String?     @unique // Link to the project created once approved
   proyectoGenerado   Proyecto?   @relation("CotizacionProyecto", fields: [proyectoGeneradoId], references: [id])
@@ -195,22 +330,26 @@ model Responsable {
   activo           Boolean?       @default(true)
   proyectos        Proyecto[]     @relation("ResponsablePrincipal")
   actividades      Actividad[]    @relation("ActividadResponsablePrincipal")
+  clientes         Cliente[]      @relation("ResponsableClientes")
   suboperaciones   Suboperacion[]
   subtareas        Subtarea[]     @relation("SubtareaResponsable")
+  fichasTecnicas   FichaTecnica[]
   usuario          Usuario?
 }
 
 model Usuario {
-  id            String       @id @default(uuid())
-  username      String       @unique
-  password      String
-  nombre        String
-  rol           String       @default("USER")
-  activo        Boolean      @default(true)
-  responsableId String?      @unique
-  responsable   Responsable? @relation(fields: [responsableId], references: [id])
-  modulos       Json         @default("[\"dashboard\"]")
-  fechaCreacion DateTime     @default(now())
+  id              String       @id @default(uuid())
+  username        String       @unique
+  password        String
+  nombre          String
+  rol             String       @default("USER")
+  activo          Boolean      @default(true)
+  responsableId   String?      @unique
+  responsable     Responsable? @relation(fields: [responsableId], references: [id])
+  modulos         Json         @default("[\"dashboard\"]")
+  ultimaActividad DateTime?    @default(now())
+  auditLogs       AuditLog[]
+  fechaCreacion   DateTime     @default(now())
 }
 
 model Proyecto {
@@ -238,7 +377,10 @@ model Proyecto {
   reportesDiarios          ReporteDiario[]
   comentarios              Comentario[]         @relation("ProyectoComentarios")
   evidencias               Evidencia[]          @relation("ProyectoEvidencias")
-  documentos               Documento[]          @relation("ProyectoDocumentos")
+  documentos          Documento[]          @relation("ProyectoDocumentos")
+
+  facturas            Factura[]            @relation("ProyectoFacturas")
+  gastos              Gasto[]              @relation("ProyectoGastos")
 
   evaluacionTecnica        EvaluacionTecnica?
   ingenieriaDiseno         IngenieriaDiseno?
@@ -506,4 +648,210 @@ model IndicadorAvance {
   actividadesTotal    Int
   actividadesCompletadas Int
   ultimaActualizacion DateTime
+}
+
+// ============================================
+// LOGÍSTICA E INVENTARIO
+// ============================================
+
+enum EstadoCompra {
+  PENDIENTE
+  APROBADO
+  RECIBIDO
+  CANCELADO
+}
+
+enum TipoMovimiento {
+  ENTRADA
+  SALIDA
+}
+
+model Proveedor {
+  id           String        @id @default(uuid())
+  ruc          String        @unique
+  razonSocial  String
+  contacto     String?
+  telefono     String?
+  email        String?
+  direccion    String?       @db.Text
+  ordenes      OrdenCompra[]
+  gastos       Gasto[]       @relation("ProveedorGastos")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model Insumo {
+  id                String               @id @default(uuid())
+  nombre            String
+  descripcion       String?              @db.Text
+  unidadMedida      String               // Unidades, Kg, Metros, etc.
+  stockActual       Float                @default(0)
+  stockMinimo       Float                @default(0)
+  precioReferencial Float                @default(0)
+  categoria         String?              // Eléctrico, Civil, EPP, etc.
+  detallesCompra    DetalleOrdenCompra[]
+  movimientos       MovimientoAlmacen[]
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+}
+
+model OrdenCompra {
+  id             String               @id @default(uuid())
+  codigo         String               @unique // OC-2026-001
+  proveedorId    String
+  proveedor      Proveedor            @relation(fields: [proveedorId], references: [id])
+  fechaEmision   DateTime             @default(now())
+  estado         EstadoCompra         @default(PENDIENTE)
+  montoTotal     Float                @default(0)
+  observaciones  String?              @db.Text
+  archivoFactura String?              // URL o path del documento
+  usuarioId      String               // ID del usuario que registra
+  items          DetalleOrdenCompra[]
+  gasto          Gasto?               @relation("OrdenCompraGasto")
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+}
+
+model DetalleOrdenCompra {
+  id            String      @id @default(uuid())
+  ordenId       String
+  orden         OrdenCompra @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  insumoId      String
+  insumo        Insumo      @relation(fields: [insumoId], references: [id])
+  cantidad      Float
+  precioUnitario Float
+  subtotal      Float
+}
+
+model MovimientoAlmacen {
+  id             String         @id @default(uuid())
+  insumoId       String
+  insumo         Insumo         @relation(fields: [insumoId], references: [id])
+  tipo           TipoMovimiento
+  cantidad       Float
+  fecha          DateTime       @default(now())
+  motivo         String?        // Compra, Despacho a Obra, Ajuste
+  usuarioId      String         // Quien realiza el movimiento
+  proyectoId     String?        // Referencia manual al ID del proyecto (Aislamiento)
+  ordenCompraId  String?        // Referencia a la OC si es entrada
+  createdAt      DateTime       @default(now())
+}
+
+// ============================================
+// FINANZAS
+// ============================================
+
+enum EstadoFactura {
+  PENDIENTE
+  PAGADA_PARCIAL
+  PAGADA
+  ANULADA
+}
+
+enum MetodoPago {
+  TRANSFERENCIA
+  EFECTIVO
+  CHEQUE
+  TARJETA
+  OTRO
+}
+
+enum EstadoGasto {
+  PENDIENTE
+  PAGADO
+  ANULADO
+}
+
+enum TipoGasto {
+  OPERATIVO
+  ADMINISTRATIVO
+  FINANCIERO
+}
+
+model Factura {
+  id               String        @id @default(uuid())
+  codigo           String        @unique // e.g. F001-000440
+  
+  clienteId        String
+  cliente          Cliente       @relation("ClienteFacturas", fields: [clienteId], references: [id])
+  
+  proyectoId       String?
+  proyecto         Proyecto?     @relation("ProyectoFacturas", fields: [proyectoId], references: [id])
+  
+  cotizacionId     String?
+  cotizacion       Cotizacion?   @relation("CotizacionFacturas", fields: [cotizacionId], references: [id])
+
+  montoSubtotal    Float         @default(0)
+  montoIgv         Float         @default(0)
+  montoTotal       Float         @default(0)
+  saldoPendiente   Float         @default(0)
+  
+  fechaEmision     DateTime      @default(now())
+  fechaVencimiento DateTime
+  
+  estado           EstadoFactura @default(PENDIENTE)
+  observaciones    String?       @db.Text
+  archivoUrl       String?       // Link al PDF de la factura
+  
+  pagos            Pago[]
+  
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([clienteId])
+  @@index([proyectoId])
+  @@index([estado])
+  @@index([fechaEmision])
+  @@map("FACTURA")
+}
+
+model Pago {
+  id               String      @id @default(uuid())
+  facturaId        String
+  factura          Factura     @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  
+  monto            Float
+  fechaPago        DateTime    @default(now())
+  metodo           MetodoPago  @default(TRANSFERENCIA)
+  referencia       String?     // Nro de operación
+  comprobanteUrl   String?     // Link al voucher
+  
+  registradoPorId  String
+  
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@map("PAGO")
+}
+
+model Gasto {
+  id               String       @id @default(uuid())
+  codigo           String?      // Nro de factura del proveedor
+  
+  proveedorId      String?
+  proveedor        Proveedor?   @relation("ProveedorGastos", fields: [proveedorId], references: [id])
+  
+  proyectoId       String?
+  proyecto         Proyecto?    @relation("ProyectoGastos", fields: [proyectoId], references: [id])
+  
+  ordenCompraId    String?      @unique
+  ordenCompra      OrdenCompra? @relation("OrdenCompraGasto", fields: [ordenCompraId], references: [id])
+  
+  tipo             TipoGasto    @default(OPERATIVO)
+  concepto         String       @db.Text
+  montoTotal       Float
+  
+  fechaEmision     DateTime     @default(now())
+  fechaVencimiento DateTime?
+  fechaPago        DateTime?
+  
+  estado           EstadoGasto  @default(PENDIENTE)
+  comprobanteUrl   String?
+  
+  registradoPorId  String
+  
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@map("GASTO")
 }

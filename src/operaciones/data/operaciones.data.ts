@@ -1,13 +1,59 @@
 // src/operaciones/data/operaciones.data.ts
 
-import { Proyecto, Responsable, Area, EstadoActividad, EstadoProyecto, Prioridad, Semaforo, TipoActividad, TipoValidacion } from '../types/index';
+import {
+  Proyecto,
+  Responsable,
+  Area,
+  EstadoActividad,
+  EstadoProyecto,
+  Prioridad,
+  Semaforo,
+  TipoActividad,
+  TipoValidacion,
+} from '../types/index';
 import { EstadoValidacion } from '@prisma/client';
 
 export const RESPONSABLES_DEFAULT: Responsable[] = [
-  { id: 'resp_steven', nombre: 'Steven', area: Area.LogisticaYRecursos, cargo: 'Coordinador Logístico', color: '#3B82F6', email: 'steven@hhtsoluciona.com', telefono: '999888777', activo: true },
-  { id: 'resp_diego', nombre: 'Diego', area: Area.IngenieriaYSupervision, cargo: 'Ingeniero Supervisor', color: '#8B5CF6', email: 'diego@hhtsoluciona.com', telefono: '999888776', activo: true },
-  { id: 'resp_guillermo', nombre: 'Guillermo', area: Area.GestionDocumentaria, cargo: 'Gestor Documental', color: '#10B981', email: 'guillermo@hhtsoluciona.com', telefono: '999888775', activo: true },
-  { id: 'resp_mario', nombre: 'Mario', area: Area.OperacionesDeCampo, cargo: 'Soporte de Campo', color: '#F59E0B', email: 'mario@hhtsoluciona.com', telefono: '999888774', activo: true },
+  {
+    id: 'resp_steven',
+    nombre: 'Steven',
+    area: Area.LogisticaYRecursos,
+    cargo: 'Coordinador Logístico',
+    color: '#3B82F6',
+    email: 'steven@hhtsoluciona.com',
+    telefono: '999888777',
+    activo: true,
+  },
+  {
+    id: 'resp_diego',
+    nombre: 'Diego',
+    area: Area.IngenieriaYSupervision,
+    cargo: 'Ingeniero Supervisor',
+    color: '#8B5CF6',
+    email: 'diego@hhtsoluciona.com',
+    telefono: '999888776',
+    activo: true,
+  },
+  {
+    id: 'resp_guillermo',
+    nombre: 'Guillermo',
+    area: Area.GestionDocumentaria,
+    cargo: 'Gestor Documental',
+    color: '#10B981',
+    email: 'guillermo@hhtsoluciona.com',
+    telefono: '999888775',
+    activo: true,
+  },
+  {
+    id: 'resp_mario',
+    nombre: 'Mario',
+    area: Area.OperacionesDeCampo,
+    cargo: 'Soporte de Campo',
+    color: '#F59E0B',
+    email: 'mario@hhtsoluciona.com',
+    telefono: '999888774',
+    activo: true,
+  },
 ];
 
 export const PROYECTOS_INICIALES: Proyecto[] = [
@@ -28,8 +74,20 @@ export const PROYECTOS_INICIALES: Proyecto[] = [
     avance: 50,
     avanceCalculado: 50,
     indicadoresAvance: [
-      { area: Area.IngenieriaYSupervision, porcentaje: 100, actividadesTotal: 2, actividadesCompletadas: 2, ultimaActualizacion: '2026-05-20' },
-      { area: Area.OperacionesDeCampo, porcentaje: 0, actividadesTotal: 1, actividadesCompletadas: 0, ultimaActualizacion: '2026-05-20' }
+      {
+        area: Area.IngenieriaYSupervision,
+        porcentaje: 100,
+        actividadesTotal: 2,
+        actividadesCompletadas: 2,
+        ultimaActualizacion: '2026-05-20',
+      },
+      {
+        area: Area.OperacionesDeCampo,
+        porcentaje: 0,
+        actividadesTotal: 1,
+        actividadesCompletadas: 0,
+        ultimaActualizacion: '2026-05-20',
+      },
     ],
     actividades: [
       {
@@ -52,12 +110,24 @@ export const PROYECTOS_INICIALES: Proyecto[] = [
             area: Area.IngenieriaYSupervision,
             estado: EstadoValidacion.Aprobada,
             validadoPor: 'Diego',
-            fechaValidacion: '2026-05-12'
-          }
+            fechaValidacion: '2026-05-12',
+          },
         ],
         subtareas: [
-          { id: 'sub_001', actividadId: 'act_001', descripcion: 'Limpieza de aisladores de porcelana', completada: true, responsableId: 'resp_mario' },
-          { id: 'sub_002', actividadId: 'act_001', descripcion: 'Limpieza de bushings', completada: true, responsableId: 'resp_mario' }
+          {
+            id: 'sub_001',
+            actividadId: 'act_001',
+            descripcion: 'Limpieza de aisladores de porcelana',
+            completada: true,
+            responsableId: 'resp_mario',
+          },
+          {
+            id: 'sub_002',
+            actividadId: 'act_001',
+            descripcion: 'Limpieza de bushings',
+            completada: true,
+            responsableId: 'resp_mario',
+          },
         ],
         comentarios: [],
         evidencias: [],
@@ -66,7 +136,7 @@ export const PROYECTOS_INICIALES: Proyecto[] = [
         orden: 1,
         checklistBloqueado: true,
         motivoBloqueoChecklist: 'Completado automáticamente',
-        historialCambios: []
+        historialCambios: [],
       },
       {
         id: 'act_002',
@@ -88,12 +158,24 @@ export const PROYECTOS_INICIALES: Proyecto[] = [
             area: Area.IngenieriaYSupervision,
             estado: EstadoValidacion.Aprobada,
             validadoPor: 'Diego',
-            fechaValidacion: '2026-05-15'
-          }
+            fechaValidacion: '2026-05-15',
+          },
         ],
         subtareas: [
-          { id: 'sub_003', actividadId: 'act_002', descripcion: 'Prueba de resistencia de aislamiento', completada: true, responsableId: 'resp_diego' },
-          { id: 'sub_004', actividadId: 'act_002', descripcion: 'Prueba de rigidez dieléctrica', completada: true, responsableId: 'resp_diego' }
+          {
+            id: 'sub_003',
+            actividadId: 'act_002',
+            descripcion: 'Prueba de resistencia de aislamiento',
+            completada: true,
+            responsableId: 'resp_diego',
+          },
+          {
+            id: 'sub_004',
+            actividadId: 'act_002',
+            descripcion: 'Prueba de rigidez dieléctrica',
+            completada: true,
+            responsableId: 'resp_diego',
+          },
         ],
         comentarios: [],
         evidencias: [],
@@ -102,7 +184,7 @@ export const PROYECTOS_INICIALES: Proyecto[] = [
         orden: 2,
         checklistBloqueado: true,
         motivoBloqueoChecklist: 'Completado automáticamente',
-        historialCambios: []
+        historialCambios: [],
       },
       {
         id: 'act_003',
@@ -121,26 +203,44 @@ export const PROYECTOS_INICIALES: Proyecto[] = [
             id: 'val_003',
             tipo: TipoValidacion.Campo,
             area: Area.OperacionesDeCampo,
-            estado: EstadoValidacion.Pendiente
+            estado: EstadoValidacion.Pendiente,
           },
           {
             id: 'val_004',
             tipo: TipoValidacion.Tecnica,
             area: Area.IngenieriaYSupervision,
-            estado: EstadoValidacion.Pendiente
-          }
+            estado: EstadoValidacion.Pendiente,
+          },
         ],
         subtareas: [
-          { id: 'sub_005', actividadId: 'act_003', descripcion: 'Drenado de aceite usado', completada: true, responsableId: 'resp_mario' },
-          { id: 'sub_006', actividadId: 'act_003', descripcion: 'Filtrado de aceite', completada: false, responsableId: 'resp_mario' },
-          { id: 'sub_007', actividadId: 'act_003', descripcion: 'Llenado de aceite nuevo', completada: false, responsableId: 'resp_mario' }
+          {
+            id: 'sub_005',
+            actividadId: 'act_003',
+            descripcion: 'Drenado de aceite usado',
+            completada: true,
+            responsableId: 'resp_mario',
+          },
+          {
+            id: 'sub_006',
+            actividadId: 'act_003',
+            descripcion: 'Filtrado de aceite',
+            completada: false,
+            responsableId: 'resp_mario',
+          },
+          {
+            id: 'sub_007',
+            actividadId: 'act_003',
+            descripcion: 'Llenado de aceite nuevo',
+            completada: false,
+            responsableId: 'resp_mario',
+          },
         ],
         comentarios: [],
         evidencias: [],
         progreso: 33,
         ponderacion: 1,
         orden: 3,
-        historialCambios: []
+        historialCambios: [],
       },
       {
         id: 'act_004',
@@ -160,8 +260,8 @@ export const PROYECTOS_INICIALES: Proyecto[] = [
         progreso: 0,
         ponderacion: 1,
         orden: 4,
-        historialCambios: []
-      }
+        historialCambios: [],
+      },
     ],
     reportesDiarios: [],
     comentarios: [],
@@ -179,8 +279,8 @@ export const PROYECTOS_INICIALES: Proyecto[] = [
         usuario: 'Diego',
         area: Area.IngenieriaYSupervision,
         fecha: '2026-05-10',
-      }
-    ]
+      },
+    ],
   },
   {
     id: 'proj_002',
@@ -200,7 +300,13 @@ export const PROYECTOS_INICIALES: Proyecto[] = [
     avance: 100,
     avanceCalculado: 100,
     indicadoresAvance: [
-      { area: Area.OperacionesDeCampo, porcentaje: 100, actividadesTotal: 2, actividadesCompletadas: 2, ultimaActualizacion: '2026-05-14' }
+      {
+        area: Area.OperacionesDeCampo,
+        porcentaje: 100,
+        actividadesTotal: 2,
+        actividadesCompletadas: 2,
+        ultimaActualizacion: '2026-05-14',
+      },
     ],
     actividades: [
       {
@@ -223,7 +329,7 @@ export const PROYECTOS_INICIALES: Proyecto[] = [
         orden: 1,
         checklistBloqueado: true,
         motivoBloqueoChecklist: 'Completado automáticamente',
-        historialCambios: []
+        historialCambios: [],
       },
       {
         id: 'act_006',
@@ -245,8 +351,8 @@ export const PROYECTOS_INICIALES: Proyecto[] = [
         orden: 2,
         checklistBloqueado: true,
         motivoBloqueoChecklist: 'Completado automáticamente',
-        historialCambios: []
-      }
+        historialCambios: [],
+      },
     ],
     reportesDiarios: [],
     comentarios: [],
@@ -275,7 +381,7 @@ export const PROYECTOS_INICIALES: Proyecto[] = [
         usuario: 'Mario',
         area: Area.OperacionesDeCampo,
         fecha: '2026-05-14',
-      }
-    ]
-  }
+      },
+    ],
+  },
 ];

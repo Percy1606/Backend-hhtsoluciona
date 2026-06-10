@@ -6,19 +6,29 @@ import { Injectable } from '@nestjs/common';
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor() {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+        (req: any) => {
+          if (req && req.query && req.query.token) {
+            console.log('[JwtStrategy] Token encontrado en query params');
+            return req.query.token;
+          }
+          return null;
+        },
+      ]),
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET || 'software-hh-secret-key-2026',
+      secretOrKey: process.env.JWT_SECRET!,
     });
   }
 
   async validate(payload: any) {
-    return { 
-      userId: payload.sub, 
-      username: payload.username, 
+    return {
+      id: payload.sub,
+      username: payload.username,
       rol: payload.rol,
       nombre: payload.nombre,
-      modulos: payload.modulos
+      modulos: payload.modulos,
+      responsable: payload.responsable,
     };
   }
 }

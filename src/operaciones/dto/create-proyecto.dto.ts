@@ -1,11 +1,16 @@
 // src/operaciones/dto/create-proyecto.dto.ts
 
+import { Area, Prioridad, EstadoProyecto } from '@prisma/client';
 import {
-  Area,
-  Prioridad,
-  EstadoProyecto,
-} from '@prisma/client';
-import { IsString, IsOptional, IsEnum, IsArray, IsNumber, Min, Max, IsDateString } from 'class-validator';
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsArray,
+  IsNumber,
+  Min,
+  Max,
+  IsDateString,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateProyectoDto {

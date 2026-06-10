@@ -18,7 +18,12 @@ export class AuthService {
     });
 
     // Validar que el usuario exista, esté activo y la contraseña sea correcta
-    if (user && user.activo && user.password && (await bcrypt.compare(pass, user.password))) {
+    if (
+      user &&
+      user.activo &&
+      user.password &&
+      (await bcrypt.compare(pass, user.password))
+    ) {
       const { password, ...result } = user;
       return result;
     }
@@ -31,15 +36,15 @@ export class AuthService {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
-    const payload = { 
-      username: user.username, 
-      sub: user.id, 
+    const payload = {
+      username: user.username,
+      sub: user.id,
       rol: user.rol,
       nombre: user.nombre,
       responsable: user.responsable,
-      modulos: user.modulos
+      modulos: user.modulos,
     };
-    
+
     return {
       access_token: this.jwtService.sign(payload),
       user: {
@@ -48,8 +53,41 @@ export class AuthService {
         nombre: user.nombre,
         rol: user.rol,
         responsable: user.responsable,
-        modulos: user.modulos
-      }
+        modulos: user.modulos,
+      },
     };
+  }
+
+  async verifyAdminPassword(
+    password: string,
+    userId?: string,
+  ): Promise<boolean> {
+    // Si se proporciona userId, validamos específicamente contra ese usuario
+    if (userId) {
+      const user = await this.prisma.usuario.findUnique({
+        where: { id: userId, activo: true, rol: 'ADMIN' },
+      });
+
+      if (user && user.password) {
+        return await bcrypt.compare(password, user.password);
+      }
+      return false;
+    }
+
+    // Comportamiento legado: Buscamos cualquier usuario administrador activo
+    const admins = await this.prisma.usuario.findMany({
+      where: {
+        rol: 'ADMIN',
+        activo: true,
+      },
+    });
+
+    for (const admin of admins) {
+      if (admin.password && (await bcrypt.compare(password, admin.password))) {
+        return true;
+      }
+    }
+
+    return false;
   }
 }

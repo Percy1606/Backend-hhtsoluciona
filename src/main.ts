@@ -13,18 +13,20 @@ async function bootstrap() {
       'http://127.0.0.1:3000',
       'http://192.168.1.250:3000',
       /\.vercel\.app$/,
-     'https://www.httsolutions.costanortec7.tech',
-     'https://httsolutions.costanortec7.tech'
+      'https://www.httsolutions.costanortec7.tech',
+      'https://httsolutions.costanortec7.tech',
     ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
   });
 
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true,
-    forbidNonWhitelisted: true,
-    transform: true,
-  }));
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
 
   // Escuchar en todas las interfaces de red
   const port = process.env.PORT ?? 4000;

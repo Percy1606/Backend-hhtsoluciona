@@ -1,0 +1,17 @@
+-- AlterTable
+ALTER TABLE `notificacion` ADD COLUMN `esGlobal` BOOLEAN NOT NULL DEFAULT false,
+    MODIFY `usuarioId` VARCHAR(191) NULL,
+    MODIFY `tipo` ENUM('SEGUIMIENTO', 'VISITA', 'COTIZACION', 'CLIENTE', 'SISTEMA', 'TECNICO') NOT NULL;
+
+-- CreateTable
+CREATE TABLE `AUDIT_LOG` (
+    `id` VARCHAR(191) NOT NULL,
+    `usuarioId` VARCHAR(191) NOT NULL,
+    `modulo` VARCHAR(191) NOT NULL,
+    `accion` VARCHAR(191) NOT NULL,
+    `detalles` JSON NULL,
+    `ip` VARCHAR(191) NULL,
+    `fechaCreacion` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

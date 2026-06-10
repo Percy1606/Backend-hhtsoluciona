@@ -2,13 +2,16 @@
 
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateProyectoDto } from './create-proyecto.dto';
+import { Area, Prioridad, EstadoProyecto, Semaforo } from '@prisma/client';
 import {
-  Area,
-  Prioridad,
-  EstadoProyecto,
-  Semaforo,
-} from '@prisma/client';
-import { IsString, IsOptional, IsEnum, IsNumber, Min, Max, IsDateString } from 'class-validator';
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsNumber,
+  Min,
+  Max,
+  IsDateString,
+} from 'class-validator';
 
 export class UpdateProyectoDto extends PartialType(CreateProyectoDto) {
   @IsOptional()
@@ -30,7 +33,7 @@ export class UpdateProyectoDto extends PartialType(CreateProyectoDto) {
   @Min(0)
   @Max(100)
   avanceCalculado?: number; // Usually calculated
-  
+
   @IsOptional()
   @IsDateString()
   fechaFinReal?: string; // Only available when project is finished
