@@ -52,7 +52,7 @@ async function main() {
       montoEstimado: 10000,
       probabilidad: 80,
       ventaProyectada: 8000,
-      tipoCliente: 'Empresa',
+      tipoCliente: 'CLIENTE',
       etapaComercial: 'Negociación',
       hallazgosTecnicos: [],
       solucionesPropuestas: [],
