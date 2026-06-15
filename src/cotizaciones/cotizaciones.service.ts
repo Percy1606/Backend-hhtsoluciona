@@ -114,18 +114,46 @@ export class CotizacionesService {
   async update(id: string, dto: UpdateCotizacionDto) {
     const oldQuote = await this.prisma.cotizacion.findUnique({
       where: { id },
-      include: { cliente: true },
+      include: { cliente: true, documentos: true },
     });
 
     if (!oldQuote) {
       throw new NotFoundException(`Cotización con ID "${id}" no encontrada.`);
     }
 
+    const { fileUrl, fileName, fileType, fecha, alcance, ...quoteData } = dto;
+
+    // Preparar datos para la actualización de la cotización
+    const updateData: any = {
+      ...quoteData,
+      fecha: fecha ? new Date(fecha) : undefined,
+      alcance: alcance !== undefined ? alcance : undefined,
+    };
+
+    // Si se subió un nuevo archivo, lo agregamos a los documentos de la cotización e incrementamos la versión
+    if (fileUrl) {
+      const nextVersion = (oldQuote.version || 1) + 1;
+      updateData.version = nextVersion;
+      updateData.documentos = {
+        create: [
+          {
+            nombre: fileName || `Cotización v${nextVersion}`,
+            url: fileUrl,
+            tipo: 'Tecnica',
+            estado: 'Borrador',
+            subidoPor: 'Admin',
+            version: nextVersion + '',
+          },
+        ],
+      };
+    }
+
     const updated = await this.prisma.cotizacion.update({
       where: { id },
-      data: {
-        ...dto,
-        fecha: dto.fecha ? new Date(dto.fecha) : undefined,
+      data: updateData,
+      include: {
+        cliente: true,
+        documentos: true,
       },
     });
 
