@@ -5,8 +5,9 @@ import {
   IsDateString,
   IsEnum,
   IsUUID,
+  IsBoolean,
 } from 'class-validator';
-import { EstadoFactura } from '@prisma/client';
+import { EstadoFactura, ClasificacionFinanciera } from '@prisma/client';
 
 export class UpdateFacturaDto {
   @IsString()
@@ -19,11 +20,15 @@ export class UpdateFacturaDto {
 
   @IsUUID()
   @IsOptional()
-  proyectoId?: string;
+  proyectoId?: string | null;
 
   @IsUUID()
   @IsOptional()
-  cotizacionId?: string;
+  cotizacionId?: string | null;
+
+  @IsEnum(ClasificacionFinanciera)
+  @IsOptional()
+  clasificacion?: ClasificacionFinanciera;
 
   @IsNumber()
   @IsOptional()
@@ -60,4 +65,24 @@ export class UpdateFacturaDto {
   @IsNumber()
   @IsOptional()
   saldoPendiente?: number;
+
+  @IsUUID()
+  @IsOptional()
+  cajaId?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isManual?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  esRecurrente?: boolean;
+
+  @IsString()
+  @IsOptional()
+  frecuencia?: string;
+
+  @IsDateString()
+  @IsOptional()
+  proximaFacturacion?: string;
 }

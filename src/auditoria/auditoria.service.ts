@@ -82,7 +82,7 @@ export class AuditoriaService {
 
   private filterTechnicalData(obj: any): any {
     if (!obj) return obj;
-    
+
     // Si es un string que parece JSON, intentar parsearlo
     if (typeof obj === 'string') {
       try {
@@ -104,7 +104,8 @@ export class AuditoriaService {
     }
 
     const filtered: any = {};
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
     for (const key in obj) {
       const value = obj[key];
@@ -124,14 +125,18 @@ export class AuditoriaService {
 
       // 3. Procesar recursivamente
       const processedValue = this.filterTechnicalData(value);
-      
+
       // Solo agregar si el valor procesado tiene contenido útil
       if (processedValue !== undefined && processedValue !== null) {
-        if (typeof processedValue === 'object' && Object.keys(processedValue).length === 0) continue;
+        if (
+          typeof processedValue === 'object' &&
+          Object.keys(processedValue).length === 0
+        )
+          continue;
         filtered[key] = processedValue;
       }
     }
-    
+
     return Object.keys(filtered).length > 0 ? filtered : null;
   }
 }

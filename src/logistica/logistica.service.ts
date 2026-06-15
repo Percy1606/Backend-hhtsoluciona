@@ -13,7 +13,10 @@ import {
   EstadoCompra,
   TipoGasto,
   EstadoGasto,
+  ClasificacionFinanciera,
+  CategoriaDistribucion,
 } from '@prisma/client';
+import { deletePhysicalFiles } from '../common/utils/file-utils';
 
 @Injectable()
 export class LogisticaService {
@@ -41,7 +44,7 @@ export class LogisticaService {
   // ============================================
 
   async createInsumo(dto: CreateInsumoDto) {
-    return this.prisma.insumo.create({ data: dto });
+    return this.prisma.insumo.create({ data: dto as any });
   }
 
   async findAllInsumos(
@@ -74,7 +77,7 @@ export class LogisticaService {
       where.stockActual = { gt: this.prisma.insumo.fields.stockMinimo }; // stockActual > stockMinimo
     }
 
-    const [data, total, stats] = await Promise.all([
+    const [data, total] = await Promise.all([
       this.prisma.insumo.findMany({
         where,
         skip,
@@ -85,24 +88,21 @@ export class LogisticaService {
         },
       }),
       this.prisma.insumo.count({ where }),
-      this.prisma.insumo.aggregate({
-        _sum: {
-            stockActual: true,
-        },
-        _count: {
-            id: true
-        }
-      })
     ]);
 
     // Calcular inversión total aproximada (esto es pesado en grandes volúmenes, pero útil para el KPI)
     // Para mayor precisión en grandes datos, se usaría un query raw o una tabla de agregación.
     const allInsumosForStats = await this.prisma.insumo.findMany({
-        select: { stockActual: true, precioReferencial: true, stockMinimo: true }
+      select: { stockActual: true, precioReferencial: true, stockMinimo: true },
     });
 
-    const totalInversion = allInsumosForStats.reduce((acc, i) => acc + (i.stockActual * i.precioReferencial), 0);
-    const lowStockCount = allInsumosForStats.filter(i => i.stockActual <= i.stockMinimo).length;
+    const totalInversion = allInsumosForStats.reduce(
+      (acc, i) => acc + Number(i.stockActual) * Number(i.precioReferencial),
+      0,
+    );
+    const lowStockCount = allInsumosForStats.filter(
+      (i) => Number(i.stockActual) <= Number(i.stockMinimo),
+    ).length;
 
     return {
       data,
@@ -113,8 +113,8 @@ export class LogisticaService {
       stats: {
         totalInversion,
         lowStockCount,
-        totalItems: total
-      }
+        totalItems: total,
+      },
     };
   }
 
@@ -132,7 +132,7 @@ export class LogisticaService {
     if (!insumo) throw new NotFoundException('Insumo no encontrado');
     return this.prisma.insumo.update({
       where: { id },
-      data: dto,
+      data: dto as any,
     });
   }
 
@@ -159,42 +159,144 @@ export class LogisticaService {
   // ============================================
 
   async createOrdenCompra(dto: CreateOrdenCompraDto, userId: string) {
+    let codigoToSave = dto.codigo;
+
+    // Auto-generación de código secuencial (Ej: OC-001, OC-002)
+    if (!codigoToSave) {
+      const lastOrden = await this.prisma.ordenCompra.findFirst({
+        orderBy: { createdAt: 'desc' },
+      });
+      if (lastOrden && lastOrden.codigo.startsWith('OC-')) {
+        const lastNumber = parseInt(lastOrden.codigo.replace('OC-', ''), 10);
+        if (!isNaN(lastNumber)) {
+          codigoToSave = `OC-${String(lastNumber + 1).padStart(3, '0')}`;
+        } else {
+          codigoToSave = 'OC-001';
+        }
+      } else {
+        codigoToSave = 'OC-001';
+      }
+    }
+
     const existe = await this.prisma.ordenCompra.findUnique({
-      where: { codigo: dto.codigo },
+      where: { codigo: codigoToSave },
     });
     if (existe)
-      throw new ConflictException('El código de orden de compra ya existe');
+      throw new ConflictException(
+        `El código de orden de compra ${codigoToSave} ya existe`,
+      );
 
-    const montoTotal = dto.items.reduce((sum: number, item: any) => {
-      if (item.cantidad <= 0) {
-        throw new BadRequestException(
-          `La cantidad del insumo debe ser mayor a cero`,
-        );
+    const montoTotal =
+      Math.round(
+        dto.items.reduce((sum: number, item: any) => {
+          const qty = Number(item.cantidad || 0);
+          const price = Number(item.precioUnitario || 0);
+          if (qty <= 0) {
+            throw new BadRequestException(
+              `La cantidad del insumo debe ser mayor a cero`,
+            );
+          }
+          return sum + qty * price;
+        }, 0) * 100,
+      ) / 100;
+
+    if (isNaN(montoTotal)) {
+      throw new BadRequestException(
+        'El cálculo del monto total es inválido. Verifique los precios y cantidades.',
+      );
+    }
+
+    // VERIFICAR DISPONIBILIDAD DE FONDOS (CAJA PRINCIPAL POR DEFECTO)
+    const caja = await this.prisma.caja.findFirst();
+    if (caja && Number(caja.saldoDisponible) < montoTotal) {
+      throw new BadRequestException(
+        `Fondos insuficientes en ${caja.nombre} (Disponible: S/ ${caja.saldoDisponible}). No se puede crear la Orden de Compra por S/ ${montoTotal}.`,
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const orden = await tx.ordenCompra.create({
+        data: {
+          codigo: codigoToSave,
+          proveedorId: dto.proveedorId,
+          observaciones: dto.observaciones,
+          montoTotal: montoTotal,
+          usuarioId: userId,
+          items: {
+            create: dto.items.map((item: any) => ({
+              insumoId: item.insumoId,
+              cantidad: Number(item.cantidad),
+              precioUnitario: Number(item.precioUnitario),
+              subtotal:
+                Math.round(
+                  Number(item.cantidad) * Number(item.precioUnitario) * 100,
+                ) / 100,
+            })),
+          },
+        } as any,
+        include: { items: { include: { insumo: true } }, proveedor: true },
+      });
+
+      // 1. CREAR EL GASTO VINCULADO PARA QUE FINANZAS LO APRUEBE
+      await tx.gasto.create({
+        data: {
+          codigo: `OC-${orden.codigo}`,
+          proveedorId: orden.proveedorId,
+          proyectoId: dto.proyectoId || null,
+          ordenCompraId: orden.id,
+          cajaId: caja?.id || null,
+          tipo: TipoGasto.PROYECTO,
+          clasificacion: ClasificacionFinanciera.PROYECTO,
+          categoriaDistribucion: CategoriaDistribucion.MATERIALES,
+          concepto: `Orden de Compra: ${orden.codigo} ${dto.observaciones ? '- ' + dto.observaciones : ''}`,
+          montoTotal: montoTotal,
+          saldoPendiente: montoTotal,
+          estado: EstadoGasto.PENDIENTE,
+          fechaEmision: new Date(),
+          registradoPorId: userId,
+        } as any,
+      });
+
+      // 2. BLOQUEAR FONDOS AUTOMÁTICAMENTE AL CREAR (PASA A COMPROMETIDO)
+      if (caja) {
+        const nuevoComprometido = Number(caja.saldoComprometido) + montoTotal;
+        const nuevoDisponible = Number(caja.saldoReal) - nuevoComprometido;
+
+        await tx.caja.update({
+          where: { id: caja.id },
+          data: {
+            saldoComprometido: nuevoComprometido,
+            saldoDisponible: nuevoDisponible,
+          },
+        });
+
+        await tx.transaccionCaja.create({
+          data: {
+            cajaId: caja.id,
+            tipo: 'BLOQUEO',
+            monto: montoTotal,
+            concepto: `Fondos comprometidos por OC: ${orden.codigo}`,
+            referenciaTipo: 'ORDEN_COMPRA',
+            referenciaId: orden.id,
+            usuarioId: userId,
+            saldoRealPrevio: Number(caja.saldoReal),
+            saldoRealNuevo: Number(caja.saldoReal),
+          } as any,
+        });
       }
-      return sum + item.cantidad * item.precioUnitario;
-    }, 0);
 
-    return this.prisma.ordenCompra.create({
-      data: {
-        codigo: dto.codigo,
-        proveedorId: dto.proveedorId,
-        observaciones: dto.observaciones,
-        montoTotal,
-        usuarioId: userId,
-        items: {
-          create: dto.items.map((item: any) => ({
-            insumoId: item.insumoId,
-            cantidad: item.cantidad,
-            precioUnitario: item.precioUnitario,
-            subtotal: item.cantidad * item.precioUnitario,
-          })),
-        },
-      },
-      include: { items: { include: { insumo: true } }, proveedor: true },
+      return orden;
     });
   }
 
-  async findAllOrdenes(page: number = 1, limit: number = 20, search: string = '') {
+  async findAllOrdenes(
+    page: number = 1,
+    limit: number = 20,
+    search: string = '',
+    estado?: string,
+    dateFrom?: string,
+    dateTo?: string,
+  ) {
     const skip = (page - 1) * limit;
     const where: any = {};
 
@@ -205,12 +307,32 @@ export class LogisticaService {
       ];
     }
 
+    if (estado && estado !== 'ALL' && estado !== 'TODOS') {
+      where.estado = estado;
+    }
+
+    if (dateFrom || dateTo) {
+      where.fechaEmision = {};
+      if (dateFrom) {
+        where.fechaEmision.gte = new Date(dateFrom);
+      }
+      if (dateTo) {
+        const toDate = new Date(dateTo);
+        toDate.setHours(23, 59, 59, 999);
+        where.fechaEmision.lte = toDate;
+      }
+    }
+
     const [data, total] = await Promise.all([
       this.prisma.ordenCompra.findMany({
         where,
         skip,
         take: limit,
-        include: { proveedor: true, items: true },
+        include: {
+          proveedor: true,
+          items: { include: { insumo: true } },
+          gasto: { include: { proyecto: true } },
+        },
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.ordenCompra.count({ where }),
@@ -300,21 +422,30 @@ export class LogisticaService {
             subtotal: item.cantidad * item.precioUnitario,
           })),
         },
-      },
+      } as any,
       include: { items: { include: { insumo: true } }, proveedor: true },
     });
   }
 
   async deleteOrdenCompra(id: string) {
-    const orden = await this.prisma.ordenCompra.findUnique({ where: { id } });
+    const orden = await this.prisma.ordenCompra.findUnique({
+      where: { id },
+      select: { estado: true, archivoFactura: true },
+    });
     if (!orden) throw new NotFoundException('Orden de compra no encontrada');
     if (orden.estado === EstadoCompra.RECIBIDO)
       throw new BadRequestException('No se puede eliminar una orden recibida');
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       await tx.detalleOrdenCompra.deleteMany({ where: { ordenId: id } });
       return tx.ordenCompra.delete({ where: { id } });
     });
+
+    if (orden.archivoFactura) {
+      await deletePhysicalFiles([orden.archivoFactura]);
+    }
+
+    return result;
   }
 
   async updateEstadoCompra(
@@ -328,6 +459,44 @@ export class LogisticaService {
     });
 
     if (!orden) throw new NotFoundException('Orden de compra no encontrada');
+
+    // SI SE CANCELA UNA ORDEN, LIBERAMOS LOS FONDOS COMPROMETIDOS
+    if (
+      nuevoEstado === EstadoCompra.CANCELADO &&
+      orden.estado !== EstadoCompra.CANCELADO
+    ) {
+      const caja = await this.prisma.caja.findFirst();
+      if (caja) {
+        await this.prisma.$transaction(async (tx) => {
+          const montoOC = Number(orden.montoTotal);
+          const nuevoComprometido = Math.max(
+            0,
+            Number(caja.saldoComprometido) - montoOC,
+          );
+          await tx.caja.update({
+            where: { id: caja.id },
+            data: {
+              saldoComprometido: nuevoComprometido,
+              saldoDisponible: Number(caja.saldoReal) - nuevoComprometido,
+            },
+          });
+          await tx.transaccionCaja.create({
+            data: {
+              cajaId: caja.id,
+              tipo: 'LIBERACION' as any,
+              monto: montoOC,
+              concepto: `Fondos liberados por cancelación de OC: ${orden.codigo}`,
+              referenciaTipo: 'ORDEN_COMPRA',
+              referenciaId: orden.id,
+              usuarioId: userId,
+              saldoRealPrevio: Number(caja.saldoReal),
+              saldoRealNuevo: Number(caja.saldoReal),
+            } as any,
+          });
+        });
+      }
+    }
+
     if (orden.estado === EstadoCompra.RECIBIDO)
       throw new BadRequestException(
         'La orden ya fue recibida y el stock actualizado',
@@ -348,32 +517,19 @@ export class LogisticaService {
             data: { stockActual: { increment: item.cantidad } },
           });
 
-          // Registrar movimiento Kardex
+          // Registrar movimiento Kardex con costo histórico
           await tx.movimientoAlmacen.create({
             data: {
               insumoId: item.insumoId,
               tipo: TipoMovimiento.ENTRADA,
               cantidad: item.cantidad,
+              costoUnitarioHistorico: Number(item.precioUnitario), // Costo de compra real
               motivo: `Compra OC: ${orden.codigo}`,
               usuarioId: userId,
               ordenCompraId: orden.id,
-            },
+            } as any,
           });
         }
-
-        // INTEGRACIÓN FINANZAS: Crear un Gasto automáticamente al recibir la mercadería
-        await tx.gasto.create({
-          data: {
-            proveedorId: orden.proveedorId,
-            ordenCompraId: orden.id,
-            concepto: `Factura por Orden de Compra: ${orden.codigo}`,
-            montoTotal: orden.montoTotal,
-            tipo: TipoGasto.OPERATIVO,
-            estado: EstadoGasto.PENDIENTE,
-            registradoPorId: userId,
-            fechaEmision: new Date(),
-          },
-        });
 
         return updatedOrden;
       });
@@ -404,7 +560,15 @@ export class LogisticaService {
     }
 
     if (!insumo) throw new NotFoundException('Insumo no encontrado');
-    if (insumo.stockActual < data.cantidad)
+
+    // ERROR 5: Validar si el insumo está inactivo
+    if (insumo.estado === 'INACTIVO') {
+      throw new BadRequestException(
+        'El insumo se encuentra inhabilitado para despachos.',
+      );
+    }
+
+    if (Number(insumo.stockActual) < data.cantidad)
       throw new BadRequestException(
         'Stock insuficiente para realizar el despacho',
       );
@@ -413,10 +577,10 @@ export class LogisticaService {
       // 1. Verificar stock actual DENTRO de la transacción (bloqueo implícito por el update posterior)
       const currentInsumo = await tx.insumo.findUnique({
         where: { id: data.insumoId },
-        select: { stockActual: true },
+        select: { stockActual: true, precioReferencial: true },
       });
 
-      if (!currentInsumo || currentInsumo.stockActual < data.cantidad) {
+      if (!currentInsumo || Number(currentInsumo.stockActual) < data.cantidad) {
         throw new BadRequestException('Stock insuficiente (concurrencia)');
       }
 
@@ -426,16 +590,17 @@ export class LogisticaService {
         data: { stockActual: { decrement: data.cantidad } },
       });
 
-      // 2. Crear movimiento de salida
+      // 2. Crear movimiento de salida con costo histórico (ERROR 3)
       return tx.movimientoAlmacen.create({
         data: {
           insumoId: data.insumoId,
           tipo: TipoMovimiento.SALIDA,
           cantidad: data.cantidad,
+          costoUnitarioHistorico: Number(currentInsumo.precioReferencial), // Guardamos el precio actual "en piedra"
           proyectoId: data.proyectoId,
           motivo: data.motivo || 'Despacho a Obra',
           usuarioId: data.usuarioId,
-        },
+        } as any,
       });
     });
   }

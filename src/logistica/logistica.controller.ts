@@ -26,7 +26,7 @@ import { EstadoCompra } from '@prisma/client';
 
 @Controller('logistica')
 @UseGuards(JwtAuthGuard, ModulesGuard, RolesGuard)
-@Modules('logistica') // Solo para usuarios con módulo logistica habilitado
+@Modules('logistica')
 export class LogisticaController {
   constructor(
     private readonly logisticaService: LogisticaService,
@@ -94,7 +94,10 @@ export class LogisticaController {
     @Param('id') id: string,
     @Body('password') password: string,
   ) {
-    const isValid = await this.authService.verifyAdminPassword(password, req.user.id);
+    const isValid = await this.authService.verifyAdminPassword(
+      password,
+      req.user.id,
+    );
     if (!isValid) {
       throw new BadRequestException(
         'La contraseña de administrador es incorrecta.',
@@ -116,11 +119,17 @@ export class LogisticaController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('search') search?: string,
+    @Query('estado') estado?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
   ) {
     return this.logisticaService.findAllOrdenes(
       page ? parseInt(page) : 1,
       limit ? parseInt(limit) : 20,
       search,
+      estado,
+      dateFrom,
+      dateTo,
     );
   }
 
@@ -154,7 +163,10 @@ export class LogisticaController {
     @Param('id') id: string,
     @Body('password') password: string,
   ) {
-    const isValid = await this.authService.verifyAdminPassword(password, req.user.id);
+    const isValid = await this.authService.verifyAdminPassword(
+      password,
+      req.user.id,
+    );
     if (!isValid) {
       throw new BadRequestException(
         'La contraseña de administrador es incorrecta.',

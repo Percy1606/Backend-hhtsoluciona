@@ -21,8 +21,8 @@ export class CreateClienteDto {
   empresa: string;
 
   @IsString()
-  @IsNotEmpty({ message: 'El RUC es obligatorio' })
-  ruc: string;
+  @IsOptional()
+  ruc?: string;
 
   @IsString()
   @IsNotEmpty({ message: 'La dirección es obligatoria' })

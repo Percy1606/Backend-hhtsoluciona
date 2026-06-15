@@ -23,6 +23,20 @@ async function main() {
 
   console.log('Seeding data...');
 
+  // 0. Crear Caja Principal (Requerido para Finanzas)
+  const caja = await prisma.caja.upsert({
+    where: { nombre: 'Caja Principal' },
+    update: {},
+    create: {
+      nombre: 'Caja Principal',
+      tipo: 'EFECTIVO' as any,
+      saldoReal: 10000,
+      saldoDisponible: 10000,
+      saldoComprometido: 0
+    }
+  });
+  console.log(`✅ Caja creada: ${caja.nombre}`);
+
   // 1. Crear Cliente PRIMERO (para que exista cuando se cree el proyecto)
   const cliente = await prisma.cliente.upsert({
     where: { id: 'CLIENTE-INICIAL' },

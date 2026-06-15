@@ -24,13 +24,17 @@ class OrdenItemDto {
 }
 
 export class CreateOrdenCompraDto {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  codigo: string;
+  codigo?: string;
 
   @IsString()
   @IsNotEmpty()
   proveedorId: string;
+
+  @IsOptional()
+  @IsString()
+  proyectoId?: string;
 
   @IsOptional()
   @IsString()

@@ -29,6 +29,8 @@ import type { Proyecto, Responsable } from '@prisma/client'; // Import Prisma ty
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ModulesGuard } from '../auth/modules.guard';
 import { Modules } from '../auth/modules.decorator';
+import { Roles } from '../auth/roles.decorator';
+import { RolesGuard } from '../auth/roles.guard';
 import { AuthService } from '../auth/auth.service';
 
 import { CreateComentarioDto } from './dto/create-comentario.dto';
@@ -96,7 +98,7 @@ export class OperacionesController {
     return this.operacionesService.updateActividad(
       id,
       updateActividadDto,
-      req.user.rol,
+      req.user,
     );
   }
 
@@ -180,7 +182,10 @@ export class OperacionesController {
     @Param('id') id: string,
     @Body('password') password: string,
   ) {
-    const isValid = await this.authService.verifyAdminPassword(password, req.user.id);
+    const isValid = await this.authService.verifyAdminPassword(
+      password,
+      req.user.id,
+    );
     if (!isValid) {
       throw new BadRequestException(
         'La contraseña de administrador es incorrecta.',
@@ -319,8 +324,12 @@ export class OperacionesController {
   // ============================================
 
   @Put('validaciones/:id')
-  async updateValidacion(@Param('id') id: string, @Body() data: any) {
-    return this.operacionesService.updateValidacion(id, data);
+  async updateValidacion(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() data: any,
+  ) {
+    return this.operacionesService.updateValidacion(id, data, req.user);
   }
 
   // ============================================
@@ -386,6 +395,26 @@ export class OperacionesController {
     return this.operacionesService.updateFicha(id, dto, req.user);
   }
 
+  @Post('fichas-tecnicas/:id/secure-delete')
+  @Roles('ADMIN')
+  @UseGuards(RolesGuard)
+  async secureRemoveFicha(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body('password') password: string,
+  ) {
+    // 1. Validar contraseña
+    const isValid = await this.authService.validateUser(
+      req.user.username,
+      password,
+    );
+    if (!isValid) {
+      throw new BadRequestException('Contraseña de administrador incorrecta.');
+    }
+
+    return this.operacionesService.removeFicha(id, req.user);
+  }
+
   @Get('responsables')
   async findAllResponsables(): Promise<Responsable[]> {
     return this.operacionesService.findAllResponsables();
@@ -411,5 +440,24 @@ export class OperacionesController {
   @Get('responsables/:id')
   async findOneResponsable(@Param('id') id: string): Promise<Responsable> {
     return this.operacionesService.findOneResponsable(id);
+  }
+
+  // ============================================
+  // TIMELINE / HISTORIAL
+  // ============================================
+
+  @Get('timeline')
+  async getTimeline(
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '20',
+    @Query('proyectoId') proyectoId?: string,
+    @Query('tipo') tipo?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.operacionesService.getTimelinePaginado(
+      parseInt(page),
+      parseInt(limit),
+      { proyectoId, tipo, search },
+    );
   }
 }

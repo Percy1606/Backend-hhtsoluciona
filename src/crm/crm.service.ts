@@ -11,6 +11,7 @@ import { UpdateClienteDto } from './dto/update-cliente.dto';
 import { CreateInteraccionDto } from './dto/create-interaccion.dto';
 import { NotificacionesService } from '../notificaciones/notificaciones.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
+import { deletePhysicalFiles } from '../common/utils/file-utils';
 
 @Injectable()
 export class CrmService {
@@ -50,7 +51,8 @@ export class CrmService {
       where.esClienteReal =
         filters.esClienteReal === 'true' || filters.esClienteReal === true;
 
-    // FILTRO DE SEGURIDAD POR ROL
+    // ELIMINADO: Ahora todos los usuarios con acceso al CRM pueden ver todos los clientes
+    /*
     if (user && user.rol !== 'ADMIN') {
       const responsableId = user.responsable?.id;
       if (responsableId) {
@@ -59,6 +61,7 @@ export class CrmService {
         where.responsableId = 'NONE';
       }
     }
+    */
 
     where.deletedAt = null;
 
@@ -168,6 +171,7 @@ export class CrmService {
       const cliente = await this.prisma.cliente.create({
         data: {
           ...rest,
+          ruc: dto.ruc && dto.ruc.trim() !== '' ? dto.ruc : null, // Permitir múltiples nulls
           codigo,
           tipoCliente: tipoCliente as any,
           clasificacion: clasificacion as any,
@@ -304,6 +308,33 @@ export class CrmService {
         );
       }
 
+      // 1. Recolectar URLs de archivos antes de borrar
+      const cliente = await this.prisma.cliente.findUnique({
+        where: { id },
+        include: {
+          documentos: { select: { url: true } },
+          fichasTecnicas: {
+            include: { adjuntos: { select: { url: true } } },
+          },
+          cotizaciones: {
+            include: { documentos: { select: { url: true } } },
+          },
+        },
+      });
+
+      const urlsToDelete: string[] = [];
+      if (cliente) {
+        if (cliente.propuestaTecnicaUrl)
+          urlsToDelete.push(cliente.propuestaTecnicaUrl);
+        cliente.documentos.forEach((d) => urlsToDelete.push(d.url));
+        cliente.fichasTecnicas.forEach((f) => {
+          f.adjuntos.forEach((a) => urlsToDelete.push(a.url));
+        });
+        cliente.cotizaciones.forEach((c) => {
+          c.documentos.forEach((d) => urlsToDelete.push(d.url));
+        });
+      }
+
       const clienteEliminado = await this.prisma.$transaction(async (tx) => {
         const fichas = await tx.fichaTecnica.findMany({
           where: { clienteId: id },
@@ -339,6 +370,9 @@ export class CrmService {
           where: { id },
         });
       });
+
+      // 2. Borrar archivos físicos solo si la transacción fue exitosa
+      await deletePhysicalFiles(urlsToDelete);
 
       if (user) {
         await this.auditoriaService.createLog({
@@ -500,17 +534,46 @@ export class CrmService {
 
   async createDocumento(dto: any) {
     const { clientId, ...data } = dto;
+
+    // Normalización para Prisma Enums
+    const tipo =
+      data.tipo &&
+      ['Tecnica', 'Administrativa', 'Legal', 'Financiero'].includes(data.tipo)
+        ? data.tipo
+        : 'Otro';
+
+    const estado =
+      data.estado &&
+      ['Borrador', 'PendienteRevision', 'Aprobado', 'Obsoleto'].includes(
+        data.estado,
+      )
+        ? data.estado
+        : 'Aprobado';
+
     return this.prisma.documento.create({
       data: {
         ...data,
+        tipo: tipo,
+        estado: estado,
         cliente: { connect: { id: clientId } },
       },
     });
   }
 
   async removeDocumento(id: string) {
-    return this.prisma.documento.delete({
+    const doc = await this.prisma.documento.findUnique({
+      where: { id },
+      select: { url: true },
+    });
+
+    const result = await this.prisma.documento.delete({
       where: { id },
     });
+
+    if (doc?.url) {
+      await deletePhysicalFiles([doc.url]);
+    }
+
+    return result;
   }
 }

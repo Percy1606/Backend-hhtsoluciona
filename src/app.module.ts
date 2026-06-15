@@ -1,6 +1,4 @@
 import { Module } from '@nestjs/common';
-import { ServeStaticModule } from '@nestjs/serve-static';
-import { join } from 'path';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ThrottlerModule } from '@nestjs/throttler';
@@ -16,13 +14,10 @@ import { NotificacionesModule } from './notificaciones/notificaciones.module';
 import { AuditoriaModule } from './auditoria/auditoria.module';
 import { LogisticaModule } from './logistica/logistica.module';
 import { FinanzasModule } from './finanzas/finanzas.module';
+import { FilesModule } from './files/files.module';
 
 @Module({
   imports: [
-    ServeStaticModule.forRoot({
-      rootPath: join(process.cwd(), 'uploads'),
-      serveRoot: '/uploads',
-    }),
     ScheduleModule.forRoot(),
     EventEmitterModule.forRoot(),
     ThrottlerModule.forRoot([
@@ -41,6 +36,7 @@ import { FinanzasModule } from './finanzas/finanzas.module';
     AuditoriaModule,
     LogisticaModule,
     FinanzasModule,
+    FilesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

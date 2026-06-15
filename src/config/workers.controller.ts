@@ -25,16 +25,21 @@ export class WorkersController {
   @Get('me')
   async findMe(@Req() req: any) {
     const user = req.user;
-    
+
     // Buscar el usuario en la DB para obtener el responsableId actualizado
     const dbUser = await this.configService.findOneUser(user.id);
-    
+
     // -- DEBUGGING --
-    console.log('DEBUG: User profile fetched from DB in findMe:', JSON.stringify(dbUser, null, 2));
+    console.log(
+      'DEBUG: User profile fetched from DB in findMe:',
+      JSON.stringify(dbUser, null, 2),
+    );
     // -- END DEBUGGING --
 
     if (!dbUser.responsableId) {
-      throw new ForbiddenException('Su usuario no tiene un perfil de trabajador vinculado');
+      throw new ForbiddenException(
+        'Su usuario no tiene un perfil de trabajador vinculado',
+      );
     }
     return this.configService.findOneWorker(dbUser.responsableId);
   }
@@ -54,22 +59,30 @@ export class WorkersController {
   }
 
   @Get(':id')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
   findOne(@Param('id') id: string) {
     return this.configService.findOneWorker(id);
   }
 
   @Patch(':id')
-  async update(@Param('id') id: string, @Body() updateWorkerDto: UpdateWorkerDto, @Req() req: any) {
+  async update(
+    @Param('id') id: string,
+    @Body() updateWorkerDto: UpdateWorkerDto,
+    @Req() req: any,
+  ) {
     const user = req.user;
-    
+
     // Si no es admin, solo puede editar su propio perfil
     if (user.rol !== 'ADMIN') {
       const dbUser = await this.configService.findOneUser(user.id);
       if (dbUser.responsableId !== id) {
-        throw new ForbiddenException('No tiene permiso para editar este perfil');
+        throw new ForbiddenException(
+          'No tiene permiso para editar este perfil',
+        );
       }
     }
-    
+
     return this.configService.updateWorker(id, updateWorkerDto);
   }
 

@@ -119,7 +119,10 @@ export class CotizacionesController {
     @Param('id') id: string,
     @Body('password') password: string,
   ) {
-    const isValid = await this.authService.verifyAdminPassword(password, req.user.id);
+    const isValid = await this.authService.verifyAdminPassword(
+      password,
+      req.user.id,
+    );
     if (!isValid) {
       throw new BadRequestException(
         'La contraseña de administrador es incorrecta.',
@@ -188,7 +191,7 @@ export class CotizacionesController {
         monto: new Intl.NumberFormat('es-PE', {
           style: 'currency',
           currency: 'PEN',
-        }).format(quote.monto),
+        }).format(Number(quote.monto || 0)),
         plazo: quote.plazo || '12 días calendario',
         validez: quote.validez || '7 días calendario',
         forma_pago: quote.formaPago || '50% adelanto y 50% contra entrega.',

@@ -45,6 +45,10 @@ export class CreateDocumentoDto {
   version?: string;
 
   @IsOptional()
+  @IsString()
+  tamano?: string;
+
+  @IsOptional()
   @IsEnum(EstadoDocumento)
   estado?: EstadoDocumento;
 

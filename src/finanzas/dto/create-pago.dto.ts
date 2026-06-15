@@ -18,6 +18,10 @@ export class CreatePagoDto {
   @IsNotEmpty()
   monto: number;
 
+  @IsUUID()
+  @IsNotEmpty()
+  cajaId: string;
+
   @IsDateString()
   @IsOptional()
   fechaPago?: string;
@@ -33,4 +37,8 @@ export class CreatePagoDto {
   @IsString()
   @IsOptional()
   comprobanteUrl?: string;
+
+  @IsString()
+  @IsOptional()
+  observaciones?: string;
 }

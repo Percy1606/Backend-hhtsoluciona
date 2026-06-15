@@ -2,7 +2,6 @@ import {
   IsString,
   IsOptional,
   IsNumber,
-  IsNotEmpty,
   IsUUID,
   IsEnum,
   IsDateString,
@@ -14,7 +13,7 @@ import {
   CategoriaDistribucion,
 } from '@prisma/client';
 
-export class CreateGastoDto {
+export class UpdateGastoDto {
   @IsString()
   @IsOptional()
   codigo?: string;
@@ -48,16 +47,16 @@ export class CreateGastoDto {
   categoriaDistribucion?: CategoriaDistribucion;
 
   @IsString()
-  @IsNotEmpty()
-  concepto: string;
+  @IsOptional()
+  concepto?: string;
 
   @IsNumber()
-  @IsNotEmpty()
-  montoTotal: number;
+  @IsOptional()
+  montoTotal?: number;
 
   @IsDateString()
-  @IsNotEmpty()
-  fechaEmision: string;
+  @IsOptional()
+  fechaEmision?: string;
 
   @IsDateString()
   @IsOptional()

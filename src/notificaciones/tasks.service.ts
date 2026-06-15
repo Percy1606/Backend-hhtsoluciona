@@ -24,6 +24,130 @@ export class TasksService {
     await this.checkAbandonedClients();
     await this.checkOverdueVisits();
     await this.checkDelayedProjects();
+    await this.checkOverdueInvoices();
+    await this.checkExpiringInvoices();
+  }
+
+  // REVISIÓN DE FACTURAS POR VENCER (en 48 horas)
+  private async checkExpiringInvoices() {
+    const today = new Date();
+    const twoDaysFromNow = new Date();
+    twoDaysFromNow.setDate(twoDaysFromNow.getDate() + 2);
+
+    // Buscar facturas no pagadas que vencen pronto
+    const expiringInvoices = await this.prisma.factura.findMany({
+      where: {
+        estado: { in: ['PENDIENTE', 'PAGO_PARCIAL'] },
+        fechaVencimiento: {
+          gte: today,
+          lte: twoDaysFromNow,
+        },
+      },
+      include: { cliente: true },
+    });
+
+    if (expiringInvoices.length === 0) return;
+
+    // Obtener usuarios que tienen el rol de ADMIN o acceso a finanzas
+    const users = await this.prisma.usuario.findMany({
+      where: {
+        OR: [{ rol: 'ADMIN' }],
+      },
+    });
+
+    const adminUsers = users.filter(
+      (u) =>
+        u.rol === 'ADMIN' ||
+        (typeof u.modulos === 'string' && u.modulos.includes('finanzas')) ||
+        (Array.isArray(u.modulos as any) &&
+          (u.modulos as any).includes('finanzas')),
+    );
+
+    for (const invoice of expiringInvoices) {
+      for (const admin of adminUsers) {
+        // Evitar duplicar la misma notificación el mismo día
+        const existingNotif = await this.prisma.notificacion.findFirst({
+          where: {
+            usuarioId: admin.id,
+            titulo: 'Factura por Vencer',
+            mensaje: { contains: invoice.codigo },
+            createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+          },
+        });
+
+        if (!existingNotif) {
+          await this.notificacionesService.create({
+            usuarioId: admin.id,
+            titulo: 'Factura por Vencer',
+            mensaje: `La factura ${invoice.codigo} del cliente ${invoice.cliente.empresa} vence en menos de 48 horas (${new Date(invoice.fechaVencimiento).toLocaleDateString()}).`,
+            tipo: 'SISTEMA',
+          });
+        }
+      }
+    }
+  }
+
+  // REVISION DE FACTURAS VENCIDAS
+  private async checkOverdueInvoices() {
+    const today = new Date();
+
+    // Buscar facturas no pagadas cuya fecha de vencimiento ya paso
+    const overdueInvoices = await this.prisma.factura.findMany({
+      where: {
+        estado: { in: ['PENDIENTE', 'PAGO_PARCIAL'] },
+        fechaVencimiento: { lt: today },
+      },
+      include: { cliente: true },
+    });
+
+    if (overdueInvoices.length === 0) return;
+
+    // Obtener usuarios que tienen el rol de ADMIN o acceso a finanzas
+    const users = await this.prisma.usuario.findMany({
+      where: {
+        OR: [{ rol: 'ADMIN' }],
+      },
+    });
+
+    const adminUsers = users.filter(
+      (u) =>
+        u.rol === 'ADMIN' ||
+        (typeof u.modulos === 'string' && u.modulos.includes('finanzas')) ||
+        (Array.isArray(u.modulos as any) &&
+          (u.modulos as any).includes('finanzas')),
+    );
+
+    for (const invoice of overdueInvoices) {
+      // Cambiar estado a VENCIDA si aun esta en PENDIENTE
+      if (invoice.estado === 'PENDIENTE') {
+        await this.prisma.factura.update({
+          where: { id: invoice.id },
+          data: { estado: 'VENCIDA' },
+        });
+      }
+
+      // Notificar a los administradores/contabilidad
+      for (const admin of adminUsers) {
+        // Evitar duplicar la misma notificación el mismo día
+        const existingNotif = await this.prisma.notificacion.findFirst({
+          where: {
+            usuarioId: admin.id,
+            titulo: 'Deuda Pendiente Crítica',
+            mensaje: { contains: invoice.codigo },
+            createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+          },
+        });
+
+        if (!existingNotif) {
+          await this.notificacionesService.create({
+            usuarioId: admin.id,
+            titulo: 'Deuda Pendiente Crítica',
+            mensaje: `La factura ${invoice.codigo} del cliente ${invoice.cliente.empresa} por un monto de S/ ${invoice.saldoPendiente} está VENCIDA.`,
+            tipo: 'SISTEMA',
+          });
+        }
+      }
+    }
   }
 
   // Se ejecuta cada 15 minutos para procesar notificaciones programadas
@@ -90,7 +214,6 @@ export class TasksService {
         }
       }
     }
-
   }
 
   // 5. Proyectos Retrasados (Semaforo Rojo)

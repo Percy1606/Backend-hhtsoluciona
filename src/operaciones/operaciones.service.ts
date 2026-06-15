@@ -24,6 +24,7 @@ import { CreateDocumentoDto } from './dto/create-documento.dto';
 import { NotificacionesService } from '../notificaciones/notificaciones.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import { v4 as uuidv4 } from 'uuid';
+import { deletePhysicalFiles } from '../common/utils/file-utils';
 
 @Injectable()
 export class OperacionesService {
@@ -73,7 +74,18 @@ export class OperacionesService {
   }
 
   async removeDocumento(id: string) {
-    return this.prisma.documento.delete({ where: { id } });
+    const doc = await this.prisma.documento.findUnique({
+      where: { id },
+      select: { url: true },
+    });
+
+    const result = await this.prisma.documento.delete({ where: { id } });
+
+    if (doc?.url) {
+      await deletePhysicalFiles([doc.url]);
+    }
+
+    return result;
   }
 
   async createSuboperacion(data: any) {
@@ -134,27 +146,47 @@ export class OperacionesService {
   ): Promise<any> {
     const skip = (page - 1) * limit;
     const where: any = {};
+    const andConditions: any[] = [];
 
+    // 1. Filtro de búsqueda por texto (Nombre o Código)
     if (filters.search) {
-      where.OR = [
-        { nombre: { contains: filters.search } },
-        { codigo: { contains: filters.search } },
-      ];
+      andConditions.push({
+        OR: [
+          { nombre: { contains: filters.search } },
+          { codigo: { contains: filters.search } },
+        ],
+      });
     }
 
+    // 2. Filtros de estado y área
     if (filters.estado) where.estado = filters.estado;
     if (filters.area) where.area = filters.area;
-    if (filters.responsablePrincipalId)
-      where.responsablePrincipalId = filters.responsablePrincipalId;
 
-    // FILTRO POR ROL
-    if (user && user.rol !== 'ADMIN') {
+    // 3. Si se solicita un responsable específico desde el filtro de UI (Filtro explícito)
+    if (filters.responsablePrincipalId) {
+      where.responsablePrincipalId = filters.responsablePrincipalId;
+    }
+
+    // 4. FILTRO DE SEGURIDAD POR ROL (Solo para usuarios no administradores/supervisores)
+    // Se asegura de que vean tanto donde son principales como adicionales
+    if (user && user.rol !== 'ADMIN' && user.rol !== 'SUPERVISOR') {
       const responsableId = user.responsable?.id;
       if (responsableId) {
-        where.responsablePrincipalId = responsableId;
+        andConditions.push({
+          OR: [
+            { responsablePrincipalId: responsableId },
+            { responsablesAdicionales: { array_contains: responsableId } },
+          ],
+        });
       } else {
+        // Si el usuario no tiene perfil de responsable vinculado, no debe ver proyectos
         where.responsablePrincipalId = 'NONE';
       }
+    }
+
+    // Combinar todas las condiciones AND si existen
+    if (andConditions.length > 0) {
+      where.AND = andConditions;
     }
 
     const [data, total] = await Promise.all([
@@ -162,7 +194,7 @@ export class OperacionesService {
         where,
         include: {
           responsablePrincipal: true,
-          cotizacionOrigen: { select: { estado: true } },
+          cotizacionOrigen: { select: { estado: true, monto: true } },
           actividades: {
             include: {
               responsablePrincipal: true,
@@ -252,8 +284,12 @@ export class OperacionesService {
     });
 
     const costoMateriales = movimientos.reduce((sum, mov) => {
-      const precio = mov.insumo?.precioReferencial || 0;
-      return sum + mov.cantidad * precio;
+      // Priorizar el costo que quedó grabado al momento de la salida (Error 3)
+      const precio = Number(
+        mov.costoUnitarioHistorico || mov.insumo?.precioReferencial || 0,
+      );
+      const cantidad = Number(mov.cantidad || 0);
+      return sum + cantidad * precio;
     }, 0);
 
     // 2. Costos de Finanzas (Gastos directos asignados a la obra)
@@ -261,10 +297,13 @@ export class OperacionesService {
       where: { proyectoId: id, estado: { not: 'ANULADO' } },
     });
 
-    const costoServicios = gastos.reduce((sum, g) => sum + g.montoTotal, 0);
+    const costoServicios = gastos.reduce(
+      (sum, g) => sum + Number(g.montoTotal || 0),
+      0,
+    );
 
     const costoTotalReal = costoMateriales + costoServicios;
-    const presupuesto = proyecto.costoPresupuestado || 0;
+    const presupuesto = Number(proyecto.costoPresupuestado || 0);
     const porcentajeConsumo =
       presupuesto > 0 ? (costoTotalReal / presupuesto) * 100 : 0;
     const margenRestante = presupuesto - costoTotalReal;
@@ -280,16 +319,22 @@ export class OperacionesService {
         materialesLogistica: costoMateriales,
         gastosFinanzas: costoServicios,
       },
-      historialMateriales: movimientos.map((m) => ({
-        fecha: m.fecha,
-        material: m.insumo?.nombre || 'Insumo Eliminado',
-        cantidad: m.cantidad,
-        costoCalculado: m.cantidad * (m.insumo?.precioReferencial || 0),
-      })),
+      historialMateriales: movimientos.map((m) => {
+        const p = Number(
+          m.costoUnitarioHistorico || m.insumo?.precioReferencial || 0,
+        );
+        const c = Number(m.cantidad || 0);
+        return {
+          fecha: m.fecha,
+          material: m.insumo?.nombre || 'Insumo Eliminado',
+          cantidad: c,
+          costoCalculado: c * p,
+        };
+      }),
       historialGastos: gastos.map((g) => ({
         fecha: g.fechaEmision,
         concepto: g.concepto,
-        monto: g.montoTotal,
+        monto: Number(g.montoTotal || 0),
         tipo: g.tipo,
       })),
     };
@@ -404,6 +449,7 @@ export class OperacionesService {
         'PROYECTO_CREADO',
         '',
         'Proyecto creado desde CRM',
+        user,
       );
       return proyecto;
     } catch (error) {
@@ -474,6 +520,7 @@ export class OperacionesService {
         'ESTADO_PROYECTO',
         proyectoToUpdate.estado,
         updateProyectoDto.estado,
+        user,
       );
     }
 
@@ -482,7 +529,67 @@ export class OperacionesService {
 
   async removeProyecto(id: string, user?: any): Promise<void> {
     try {
-      const proyecto = await this.prisma.proyecto.findUnique({ where: { id } });
+      const proyecto = await this.prisma.proyecto.findUnique({
+        where: { id },
+        include: {
+          evidencias: true,
+          documentos: true,
+          ingenieriaDiseno: { include: { planos: true } },
+          suboperaciones: { include: { entregables: true } },
+          reportesDiarios: { include: { evidencias: true } },
+          evaluacionTecnica: true,
+          actividades: {
+            include: {
+              evidencias: true,
+              validacionesRequeridas: true,
+            },
+          },
+        },
+      });
+
+      if (!proyecto) throw new NotFoundException('Proyecto no encontrado');
+
+      // 1. RECOPILAR TODAS LAS URL DE ARCHIVOS ASOCIADOS AL PROYECTO
+      const urlsToDelete: string[] = [];
+
+      proyecto.evidencias.forEach((e) => {
+        if (e.url) urlsToDelete.push(e.url);
+      });
+      proyecto.documentos.forEach((d) => {
+        if (d.url) urlsToDelete.push(d.url);
+      });
+
+      if (proyecto.ingenieriaDiseno) {
+        proyecto.ingenieriaDiseno.planos.forEach((p) => {
+          if (p.url) urlsToDelete.push(p.url);
+        });
+      }
+
+      proyecto.suboperaciones.forEach((s) => {
+        s.entregables.forEach((en) => {
+          if (en.url) urlsToDelete.push(en.url);
+        });
+      });
+
+      proyecto.reportesDiarios.forEach((r) => {
+        r.evidencias.forEach((ev) => {
+          if (ev.url) urlsToDelete.push(ev.url);
+        });
+      });
+
+      if (proyecto.evaluacionTecnica?.documentoUrl) {
+        urlsToDelete.push(proyecto.evaluacionTecnica.documentoUrl);
+      }
+
+      proyecto.actividades.forEach((act) => {
+        act.evidencias.forEach((ev) => {
+          if (ev.url) urlsToDelete.push(ev.url);
+        });
+        act.validacionesRequeridas.forEach((val) => {
+          if (val.evidenciaUrl) urlsToDelete.push(val.evidenciaUrl);
+        });
+      });
+
       await this.prisma.$transaction(async (tx) => {
         const actividades = await tx.actividad.findMany({
           where: { proyectoId: id },
@@ -539,6 +646,9 @@ export class OperacionesService {
         await tx.indicadorAvance.deleteMany({ where: { proyectoId: id } });
         await tx.proyecto.delete({ where: { id } });
       });
+
+      // 2. ELIMINACIÓN FÍSICA DE LOS ARCHIVOS DEL DISCO SOLO SI TRANSACCIÓN EXITOSA
+      await deletePhysicalFiles(urlsToDelete);
 
       if (user) {
         await this.auditoriaService.createLog({
@@ -638,6 +748,7 @@ export class OperacionesService {
         'ACTIVIDAD_CREADA',
         '',
         actividad.descripcion,
+        user,
       );
       await this.updateProjectProgress(prismaData.proyectoId);
 
@@ -655,7 +766,7 @@ export class OperacionesService {
   async updateActividad(
     id: string,
     dto: UpdateActividadDto,
-    userRole?: string,
+    user?: any,
   ): Promise<any> {
     const oldActividad = await this.prisma.actividad.findUnique({
       where: { id },
@@ -664,23 +775,29 @@ export class OperacionesService {
     if (!oldActividad)
       throw new NotFoundException(`Actividad con ID "${id}" no encontrada.`);
 
-    const isAdmin = userRole === 'ADMIN';
+    const isAdmin = user?.rol === 'ADMIN';
     const isLider =
       dto.responsableId &&
       oldActividad.proyecto.responsablePrincipalId === dto.responsableId;
 
-    console.log(`[updateActividad] ID: ${id}, Role: ${userRole}, isAdmin: ${isAdmin}, isLider: ${isLider}`);
+    console.log(
+      `[updateActividad] ID: ${id}, Role: ${user?.rol}, isAdmin: ${isAdmin}, isLider: ${isLider}`,
+    );
 
     if (dto.estado === 'Validada' && !isAdmin && !isLider) {
-      console.error(`[updateActividad] Permission Denied: User is not ADMIN or Project Leader`);
-      throw new Error(
+      console.error(
+        `[updateActividad] Permission Denied: User is not ADMIN or Project Leader`,
+      );
+      throw new BadRequestException(
         'Solo el administrador o el Jefe de Proyecto pueden validar actividades.',
       );
     }
-    
+
     if (oldActividad.estado === 'Validada' && !isAdmin && !isLider) {
-      console.error(`[updateActividad] Locked: Activity is already validated and user is not ADMIN or Project Leader`);
-      throw new Error('Actividad bloqueada por validación.');
+      console.error(
+        `[updateActividad] Locked: Activity is already validated and user is not ADMIN or Project Leader`,
+      );
+      throw new BadRequestException('Actividad bloqueada por validación.');
     }
 
     let nuevoProgreso = dto.progreso;
@@ -714,7 +831,7 @@ export class OperacionesService {
         nuevoProgreso = 100;
     }
 
-    const { userRole: _, ...prismaData } = dto;
+    const { userRole: _, responsableId: __, ...prismaData } = dto;
     const updated = await this.prisma.actividad.update({
       where: { id },
       data: {
@@ -793,6 +910,7 @@ export class OperacionesService {
         'ESTADO_ACTIVIDAD',
         oldActividad.estado,
         dto.estado,
+        user,
       );
       await this.updateProjectProgress(oldActividad.proyectoId);
     }
@@ -800,9 +918,27 @@ export class OperacionesService {
   }
 
   async removeActividad(id: string): Promise<void> {
-    const actividad = await this.prisma.actividad.findUnique({ where: { id } });
+    const actividad = await this.prisma.actividad.findUnique({
+      where: { id },
+      include: {
+        evidencias: { select: { url: true } },
+        validacionesRequeridas: { select: { evidenciaUrl: true } },
+      },
+    });
+
     if (actividad) {
+      const urlsToDelete: string[] = [];
+      actividad.evidencias.forEach((e) => {
+        if (e.url) urlsToDelete.push(e.url);
+      });
+      actividad.validacionesRequeridas.forEach((v) => {
+        if (v.evidenciaUrl) urlsToDelete.push(v.evidenciaUrl);
+      });
+
       await this.prisma.actividad.delete({ where: { id } });
+
+      await deletePhysicalFiles(urlsToDelete);
+
       await this.updateProjectProgress(actividad.proyectoId);
     }
   }
@@ -815,31 +951,49 @@ export class OperacionesService {
   ) {
     const skip = (page - 1) * limit;
     const where: any = {};
+    const andConditions: any[] = [];
+
+    // 1. Filtros básicos
     if (filters.proyectoId) where.proyectoId = filters.proyectoId;
     if (filters.estado && filters.estado !== 'all')
       where.estado = filters.estado;
     if (filters.responsableId && filters.responsableId !== 'all')
       where.responsablePrincipalId = filters.responsableId;
+
+    // 2. Filtro de búsqueda por texto
     if (filters.search) {
-      where.OR = [
-        { descripcion: { contains: filters.search } },
-        { proyecto: { codigo: { contains: filters.search } } },
-        { proyecto: { nombre: { contains: filters.search } } },
-      ];
+      andConditions.push({
+        OR: [
+          { descripcion: { contains: filters.search } },
+          { proyecto: { codigo: { contains: filters.search } } },
+          { proyecto: { nombre: { contains: filters.search } } },
+        ],
+      });
     }
 
-    // FILTRO POR ROL
-    if (user && user.rol !== 'ADMIN') {
+    // 3. FILTRO DE SEGURIDAD POR ROL
+    if (user && user.rol !== 'ADMIN' && user.rol !== 'SUPERVISOR') {
       const responsableId = user.responsable?.id;
       if (responsableId) {
-        where.responsablePrincipalId = responsableId;
+        // El usuario estándar ve tareas donde es Principal O donde es de Apoyo
+        andConditions.push({
+          OR: [
+            { responsablePrincipalId: responsableId },
+            { responsablesApoyo: { array_contains: responsableId } },
+          ],
+        });
       } else {
         where.responsablePrincipalId = 'NONE';
       }
     }
 
+    // Combinar condiciones AND si existen
+    if (andConditions.length > 0) {
+      where.AND = andConditions;
+    }
+
     console.log(
-      `[OperacionesService] Buscando actividades para usuario ${user?.username} (${user?.rol}). Filtros:`,
+      `[OperacionesService] Buscando actividades para usuario ${user?.username} (${user?.rol}). Filtros Finales:`,
       where,
     );
 
@@ -876,7 +1030,7 @@ export class OperacionesService {
     return subtarea;
   }
 
-  async updateValidacion(id: string, data: any): Promise<any> {
+  async updateValidacion(id: string, data: any, user?: any): Promise<any> {
     const validacion = await this.prisma.validacionRequerida.update({
       where: { id },
       data: {
@@ -899,6 +1053,7 @@ export class OperacionesService {
             : 'VALIDACION_RECHAZADA',
           validacion.tipo,
           data.observaciones || 'Sin observaciones',
+          user,
         );
       }
       if (data.estado === 'Aprobada') {
@@ -922,6 +1077,7 @@ export class OperacionesService {
             'ESTADO_ACTIVIDAD',
             activityWithVal.estado,
             'Validada',
+            user,
           );
           await this.updateProjectProgress(activityWithVal.proyectoId);
         }
@@ -997,13 +1153,18 @@ export class OperacionesService {
           fecha: new Date(),
           tipo: 'Visita',
           accion: 'Visita Técnica Programada',
-          observaciones: `Se programó una visita técnica para el ${fechaFmt}. Técnico asignado: ${ficha.tecnico.nombre}. Notas: ${ficha.observaciones || 'Sin observaciones'}`,
+          observaciones: `Visita agendada para el ${fechaFmt}. Técnico: ${ficha.tecnico.nombre}. ${ficha.observaciones ? 'Notas: ' + ficha.observaciones : ''}`,
           usuario: user?.nombre || 'SISTEMA',
         },
       });
-      console.log(`[Operaciones] Bitácora CRM actualizada (Programación) para cliente ${ficha.clienteId}`);
+      console.log(
+        `[Operaciones] Bitácora CRM actualizada (Programación) para cliente ${ficha.clienteId}`,
+      );
     } catch (error) {
-      console.error('[Operaciones] Error al registrar bitácora CRM (Programación):', error.message);
+      console.error(
+        '[Operaciones] Error al registrar bitácora CRM (Programación):',
+        error.message,
+      );
     }
 
     // TRIGGER: Notificar al Técnico Asignado (Seguimiento Técnico)
@@ -1012,13 +1173,16 @@ export class OperacionesService {
     });
 
     if (userTecnico) {
-      const fechaFormateada = new Date(ficha.fechaVisita).toLocaleString('es-PE', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
+      const fechaFormateada = new Date(ficha.fechaVisita).toLocaleString(
+        'es-PE',
+        {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        },
+      );
 
       await this.notificacionesService.create({
         usuarioId: userTecnico.id,
@@ -1050,10 +1214,10 @@ export class OperacionesService {
     const safeLimit = isNaN(limit) || limit < 1 ? 20 : limit;
 
     const skip = (safePage - 1) * safeLimit;
-    
+
     // Construcción robusta del objeto where
     let where: any = {};
-    
+
     if (typeof filters === 'string') {
       where.tecnicoId = filters;
     } else if (filters && typeof filters === 'object') {
@@ -1094,9 +1258,13 @@ export class OperacionesService {
         // Si no tiene responsable vinculado y no es Admin/Supervisor, no debería ver nada
         where.tecnicoId = 'NONE';
       }
-    } else if (user && (user.rol === 'ADMIN' || user.rol === 'SUPERVISOR') && filters.tecnicoId) {
-       // Si es ADMIN/SUPERVISOR y filtró por un técnico específico, lo respetamos
-       where.tecnicoId = filters.tecnicoId;
+    } else if (
+      user &&
+      (user.rol === 'ADMIN' || user.rol === 'SUPERVISOR') &&
+      filters.tecnicoId
+    ) {
+      // Si es ADMIN/SUPERVISOR y filtró por un técnico específico, lo respetamos
+      where.tecnicoId = filters.tecnicoId;
     }
 
     const [data, total, pending, completed] = await Promise.all([
@@ -1133,9 +1301,20 @@ export class OperacionesService {
     };
     if (datosTecnicos !== undefined) data.datosTecnicos = datosTecnicos;
     if (adjuntos && Array.isArray(adjuntos)) {
+      // 1. Obtener URLs de adjuntos antiguos para borrarlos físicamente
+      const oldAdjuntos = await this.prisma.fichaTecnicaAdjunto.findMany({
+        where: { fichaTecnicaId: id },
+        select: { url: true },
+      });
+      const oldUrls = oldAdjuntos.map((a) => a.url).filter(Boolean);
+
       await this.prisma.fichaTecnicaAdjunto.deleteMany({
         where: { fichaTecnicaId: id },
       });
+
+      // 2. Borrar físicamente los archivos antiguos
+      await deletePhysicalFiles(oldUrls);
+
       data.adjuntos = {
         create: adjuntos.map((a: any) => ({
           nombre: a.nombre,
@@ -1159,22 +1338,66 @@ export class OperacionesService {
       });
     }
 
-    // TRIGGER: Notificar al asesor comercial cuando se completa la ficha
+    // TRIGGER: Notificaciones y Actualización CRM al completar la ficha
     if (dto.estado === 'COMPLETADA') {
-      const asesor = await this.prisma.usuario.findFirst({
-        where: { responsable: { nombre: updatedFicha.cliente.asignadoA } },
-      });
-      if (asesor) {
-        await this.notificacionesService.create({
-          usuarioId: asesor.id,
-          titulo: 'Inspección Finalizada',
-          mensaje: `El técnico ha completado la ficha técnica del cliente ${updatedFicha.cliente.empresa}. Ya puede proceder con la cotización.`,
-          tipo: 'VISITA',
-        });
-      }
+      console.log(
+        `[Operaciones] >>> INICIANDO PROCESO DE FINALIZACIÓN para ficha ${id}`,
+      );
 
-      // REGISTRAR EN BITÁCORA DE SEGUIMIENTO (CRM)
       try {
+        // 1. Notificar al Asesor Específico (si existe)
+        const nombreAsesor = updatedFicha.cliente?.asignadoA?.trim();
+        if (nombreAsesor) {
+          const asesor = await this.prisma.usuario.findFirst({
+            where: { responsable: { nombre: { contains: nombreAsesor } } },
+          });
+          if (asesor) {
+            await this.notificacionesService.create({
+              usuarioId: asesor.id,
+              titulo: '¡Tu Inspección está Lista!',
+              mensaje: `Se ha completado la ficha de ${updatedFicha.cliente.empresa}. Ya puedes generar la cotización.`,
+              tipo: 'VISITA',
+            });
+          }
+        }
+
+        // 2. NOTIFICAR A TODO EL EQUIPO COMERCIAL (ERROR SOLICITADO)
+        // Buscamos usuarios activos que tengan 'comercial' o 'crm' en sus módulos
+        const usuariosComerciales = await this.prisma.usuario.findMany({
+          where: { activo: true },
+        });
+
+        for (const u of usuariosComerciales) {
+          let tieneAcceso = false;
+          try {
+            const modulos =
+              typeof u.modulos === 'string' ? JSON.parse(u.modulos) : u.modulos;
+            if (Array.isArray(modulos)) {
+              tieneAcceso = modulos.some((m) =>
+                ['comercial', 'crm'].includes(String(m).toLowerCase()),
+              );
+            }
+          } catch (e) {
+            if (
+              String(u.modulos).toLowerCase().includes('comercial') ||
+              String(u.modulos).toLowerCase().includes('crm')
+            ) {
+              tieneAcceso = true;
+            }
+          }
+
+          // Evitar notificar dos veces al mismo si él era el asesor principal (ya notificado arriba)
+          if (tieneAcceso && (!nombreAsesor || u.nombre !== nombreAsesor)) {
+            await this.notificacionesService.create({
+              usuarioId: u.id,
+              titulo: 'Nueva Inspección Finalizada',
+              mensaje: `La inspección para ${updatedFicha.cliente.empresa} ha finalizado. Los datos técnicos están sincronizados para cotizar.`,
+              tipo: 'VISITA',
+            });
+          }
+        }
+
+        // 3. REGISTRAR EN BITÁCORA DE SEGUIMIENTO (CRM)
         await this.prisma.interaccion.create({
           data: {
             clientId: updatedFicha.clienteId,
@@ -1185,21 +1408,71 @@ export class OperacionesService {
             usuario: user?.nombre || 'TÉCNICO DE CAMPO',
           },
         });
-        console.log(`[Operaciones] Bitácora CRM actualizada (Finalización) para cliente ${updatedFicha.clienteId}`);
-        
-        // Actualizar etapa comercial del cliente a "Inspección Realizada"
+
+        // 4. Actualizar etapa comercial del cliente a "Inspección Realizada"
         await this.prisma.cliente.update({
           where: { id: updatedFicha.clienteId },
-          data: { 
+          data: {
             etapaComercial: 'Inspección Realizada',
-            ultimoContacto: new Date()
-          }
+            ultimoContacto: new Date(),
+            // Asegurar sincronización de datos técnicos al perfil del cliente
+            hallazgosTecnicos: dto.hallazgos
+              ? String(dto.hallazgos)
+                  .split('\n')
+                  .filter((s) => s.trim() !== '')
+              : undefined,
+            solucionesPropuestas: dto.recomendaciones
+              ? String(dto.recomendaciones)
+                  .split('\n')
+                  .filter((s) => s.trim() !== '')
+              : undefined,
+            accion: 'Realizar Cotización',
+          },
         });
-      } catch (error) {
-        console.error('[Operaciones] Error al registrar bitácora CRM (Finalización):', error.message);
+
+        console.log(
+          `[Operaciones] >>> ÉXITO: Cliente ${updatedFicha.cliente.empresa} movido a "Inspección Realizada"`,
+        );
+      } catch (triggerError) {
+        console.error(
+          '[Operaciones] ERROR en triggers de finalización:',
+          triggerError,
+        );
       }
     }
     return updatedFicha;
+  }
+
+  async removeFicha(id: string, user?: any) {
+    const ficha = await this.prisma.fichaTecnica.findUnique({
+      where: { id },
+      include: { adjuntos: true, cliente: true },
+    });
+    if (!ficha) throw new NotFoundException('Ficha técnica no encontrada');
+
+    // 1. RECOPILAR TODAS LAS URL DE ADJUNTOS
+    const urlsToDelete =
+      ficha.adjuntos?.map((adj) => adj.url).filter(Boolean) || [];
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.fichaTecnicaAdjunto.deleteMany({
+        where: { fichaTecnicaId: id },
+      });
+      await tx.fichaTecnica.delete({ where: { id } });
+    });
+
+    // 2. ELIMINACIÓN FÍSICA SOLO SI TRANSACCIÓN EXITOSA
+    await deletePhysicalFiles(urlsToDelete);
+
+    if (user) {
+      await this.auditoriaService.createLog({
+        usuarioId: user.id,
+        modulo: 'OPERACIONES',
+        accion: 'ELIMINAR_FICHA_TECNICA',
+        detalles: { fichaId: id, cliente: ficha.cliente.empresa },
+      });
+    }
+    return { success: true };
   }
 
   private async registrarHistorial(
@@ -1208,7 +1481,40 @@ export class OperacionesService {
     campo: string,
     valorAnterior: string,
     valorNuevo: string,
+    user?: any,
   ) {
+    // 1. Identificar al usuario que realiza la acción (Diego, Percy, etc)
+    const usuarioFinal =
+      user?.nombre ||
+      user?.username ||
+      (user?.id ? `ID:${user.id.slice(0, 5)}` : 'Sistema');
+
+    // 2. Obtener el nombre del responsable para que quede grabado "en piedra"
+    let responsableAGrabar = null;
+    try {
+      if (actividadId) {
+        const act = await this.prisma.actividad.findUnique({
+          where: { id: actividadId },
+          include: { responsablePrincipal: { select: { nombre: true } } },
+        });
+        responsableAGrabar = act?.responsablePrincipal?.nombre;
+      }
+
+      // Si no hay actividad o no tiene responsable, buscamos el del proyecto
+      if (!responsableAGrabar && proyectoId) {
+        const proy = await this.prisma.proyecto.findUnique({
+          where: { id: proyectoId },
+          include: { responsablePrincipal: { select: { nombre: true } } },
+        });
+        responsableAGrabar = proy?.responsablePrincipal?.nombre;
+      }
+    } catch (e) {
+      console.error(
+        '[registrarHistorial] Error al buscar responsable:',
+        e.message,
+      );
+    }
+
     await this.prisma.historialCambio.create({
       data: {
         proyectoId,
@@ -1216,9 +1522,10 @@ export class OperacionesService {
         campo,
         valorAnterior: String(valorAnterior),
         valorNuevo: String(valorNuevo),
-        usuario: 'Sistema',
+        usuario: usuarioFinal,
         area: 'OperacionesDeCampo',
         fecha: new Date(),
+        motivo: responsableAGrabar, // Persistimos el nombre aquí
       },
     });
   }
@@ -1277,6 +1584,126 @@ export class OperacionesService {
       throw new NotFoundException(`Responsable con ID "${id}" no encontrado.`);
     return responsable;
   }
+
+  // ============================================
+  // TIMELINE / HISTORIAL
+  // ============================================
+
+  async getTimelinePaginado(
+    page: number = 1,
+    limit: number = 20,
+    filters: { proyectoId?: string; tipo?: string; search?: string } = {},
+  ) {
+    const skip = (page - 1) * limit;
+    const where: any = {};
+    const andConditions: any[] = [];
+
+    // 1. Filtro por Proyecto
+    if (filters.proyectoId && filters.proyectoId !== 'all') {
+      where.proyectoId = filters.proyectoId;
+    }
+
+    // 2. Filtro por Tipo de Evento
+    if (filters.tipo && filters.tipo !== 'all') {
+      if (filters.tipo === 'proyectos') {
+        andConditions.push({
+          OR: [
+            { campo: { contains: 'PROYECTO' } },
+            { campo: { contains: 'ESTADO_PROYECTO' } },
+          ],
+        });
+      } else if (filters.tipo === 'actividades') {
+        andConditions.push({
+          OR: [
+            { campo: { contains: 'ACTIVIDAD' } },
+            { campo: { contains: 'ESTADO_ACTIVIDAD' } },
+          ],
+        });
+      } else if (filters.tipo === 'validaciones') {
+        andConditions.push({
+          campo: { contains: 'VALIDACION' },
+        });
+      } else if (filters.tipo === 'checklist') {
+        andConditions.push({
+          campo: { contains: 'CHECKLIST' },
+        });
+      }
+    }
+
+    // 3. Filtro por Búsqueda (Texto)
+    if (filters.search) {
+      andConditions.push({
+        OR: [
+          { campo: { contains: filters.search } },
+          { valorNuevo: { contains: filters.search } },
+          { usuario: { contains: filters.search } },
+          {
+            proyecto: {
+              OR: [
+                { nombre: { contains: filters.search } },
+                { codigo: { contains: filters.search } },
+              ],
+            },
+          },
+          {
+            actividad: {
+              descripcion: { contains: filters.search },
+            },
+          },
+        ],
+      });
+    }
+
+    if (andConditions.length > 0) {
+      where.AND = andConditions;
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.historialCambio.findMany({
+        where,
+        include: {
+          proyecto: {
+            select: {
+              codigo: true,
+              nombre: true,
+              responsablePrincipal: { select: { nombre: true } },
+            },
+          },
+          actividad: {
+            select: {
+              descripcion: true,
+              responsablePrincipal: { select: { nombre: true } },
+            },
+          },
+        },
+        orderBy: { fecha: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.historialCambio.count({ where }),
+    ]);
+
+    // Mapear al formato que espera el frontend
+    const formattedData = data.map((h) => ({
+      ...h,
+      proyectoNombre: h.proyecto?.nombre,
+      proyectoCodigo: h.proyecto?.codigo,
+      actividadDescripcion: h.actividad?.descripcion,
+      responsableNombre:
+        h.motivo ||
+        h.actividad?.responsablePrincipal?.nombre ||
+        h.proyecto?.responsablePrincipal?.nombre,
+    }));
+
+    return {
+      data: formattedData,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
   private async generateProjectCode(): Promise<string> {
     const year = new Date().getFullYear();
     const prefix = `HHT-OPE-${year.toString().slice(-2)}-`;

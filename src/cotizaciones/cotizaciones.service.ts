@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateCotizacionDto } from './dto/create-cotizacion.dto';
 import { UpdateCotizacionDto } from './dto/update-cotizacion.dto';
 import { NotificacionesService } from '../notificaciones/notificaciones.service';
+import { deletePhysicalFiles } from '../common/utils/file-utils';
 
 @Injectable()
 export class CotizacionesService {
@@ -67,6 +68,38 @@ export class CotizacionesService {
         },
       });
 
+      // TRIGGER AUTOMÁTICO: Mover a "Cotización Enviada" (Error Solicitado)
+      try {
+        await this.prisma.cliente.update({
+          where: { id: cotizacion.clientId },
+          data: {
+            etapaComercial: 'Cotización Enviada',
+            accion: 'Hacer Seguimiento',
+            ultimoContacto: new Date(),
+          },
+        });
+
+        await this.prisma.interaccion.create({
+          data: {
+            clientId: cotizacion.clientId,
+            fecha: new Date(),
+            tipo: 'Propuesta',
+            accion: 'Cotización Registrada',
+            observaciones: `Se registró la cotización ${cotizacion.codigo} por un monto de S/ ${cotizacion.monto}. El cliente ha sido movido automáticamente a etapa "Cotización Enviada".`,
+            usuario: 'SISTEMA',
+          },
+        });
+
+        console.log(
+          `[Cotizaciones] Cliente ${cotizacion.cliente?.empresa} movido automáticamente a "Cotización Enviada"`,
+        );
+      } catch (triggerError) {
+        console.error(
+          '[Cotizaciones] Error en trigger de actualización de etapa:',
+          triggerError.message,
+        );
+      }
+
       return cotizacion;
     } catch (error) {
       console.error('[Cotizaciones] Error detallado al crear:', error);
@@ -96,8 +129,39 @@ export class CotizacionesService {
       },
     });
 
-    // TRIGGER: Notificación de Venta Cerrada
+    // TRIGGER: Notificación de Venta Cerrada y Actualización de Cliente
     if (dto.estado === 'Aprobado' && oldQuote.estado !== 'Aprobado') {
+      try {
+        // 1. Actualizar Etapa del Cliente a "Ganado"
+        await this.prisma.cliente.update({
+          where: { id: updated.clientId },
+          data: {
+            etapaComercial: 'Ganado',
+            accion: 'Finalizado',
+            esClienteReal: true,
+            ultimoContacto: new Date(),
+          },
+        });
+
+        // 2. Crear interacción de cierre
+        await this.prisma.interaccion.create({
+          data: {
+            clientId: updated.clientId,
+            cotizacionId: updated.id,
+            fecha: new Date(),
+            tipo: 'Venta',
+            accion: 'Cotización Aprobada',
+            observaciones: `La cotización ${updated.codigo} por S/ ${updated.monto} ha sido aprobada. El cliente ha pasado a etapa "Ganado".`,
+            usuario: 'SISTEMA',
+          },
+        });
+      } catch (triggerError) {
+        console.error(
+          '[Cotizaciones] Error al actualizar estado de cliente en aprobación:',
+          triggerError.message,
+        );
+      }
+
       const admins = await this.prisma.usuario.findMany({
         where: { rol: 'ADMIN' },
       });
@@ -169,7 +233,22 @@ export class CotizacionesService {
   }
 
   async remove(id: string) {
-    return this.prisma.cotizacion.delete({ where: { id } });
+    const cotizacion = await this.prisma.cotizacion.findUnique({
+      where: { id },
+      include: { documentos: { select: { url: true } } },
+    });
+
+    if (!cotizacion) {
+      throw new NotFoundException(`Cotización con ID "${id}" no encontrada.`);
+    }
+
+    const urlsToDelete = cotizacion.documentos.map((d) => d.url).filter(Boolean);
+
+    const result = await this.prisma.cotizacion.delete({ where: { id } });
+
+    await deletePhysicalFiles(urlsToDelete);
+
+    return result;
   }
 
   private async generateCode(): Promise<string> {

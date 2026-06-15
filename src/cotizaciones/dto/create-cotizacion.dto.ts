@@ -1,10 +1,12 @@
 import { IsString, IsOptional, IsNumber, IsDateString } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class CreateCotizacionDto {
   @IsString()
   clientId: string;
 
   @IsNumber()
+  @Type(() => Number)
   monto: number;
 
   @IsString()
@@ -63,6 +65,7 @@ export class CreateCotizacionDto {
 
   @IsOptional()
   @IsNumber()
+  @Type(() => Number)
   version?: number;
 
   @IsOptional()

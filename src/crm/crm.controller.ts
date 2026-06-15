@@ -12,6 +12,8 @@ import {
   Query,
   BadRequestException,
   Req,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
 import { CrmService } from './crm.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
@@ -21,6 +23,9 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ModulesGuard } from '../auth/modules.guard';
 import { Modules } from '../auth/modules.decorator';
 import { AuthService } from '../auth/auth.service';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname } from 'path';
 
 @Controller('crm')
 @UseGuards(JwtAuthGuard)
@@ -96,7 +101,10 @@ export class CrmController {
     @Body('password') password: string,
   ) {
     console.log(`[CRM] Intento de eliminación segura para cliente: ${id}`);
-    const isValid = await this.authService.verifyAdminPassword(password, req.user.id);
+    const isValid = await this.authService.verifyAdminPassword(
+      password,
+      req.user.id,
+    );
     if (!isValid) {
       throw new BadRequestException(
         'La contraseña de administrador es incorrecta.',
@@ -172,6 +180,32 @@ export class CrmController {
   // ============================================
   // DOCUMENTOS DEL CLIENTE
   // ============================================
+
+  @Post('upload')
+  @UseGuards(ModulesGuard)
+  @Modules('crm')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: './uploads/crm',
+        filename: (req: any, file: any, cb: any) => {
+          const uniqueSuffix =
+            Date.now() + '-' + Math.round(Math.random() * 1e9);
+          cb(null, `${uniqueSuffix}${extname(file.originalname)}`);
+        },
+      }),
+      limits: { fileSize: 15 * 1024 * 1024 }, // 15MB limit
+    }),
+  )
+  async uploadFile(@UploadedFile() file: any) {
+    if (!file) throw new BadRequestException('Archivo no válido.');
+    return {
+      url: `/uploads/crm/${file.filename}`,
+      nombre: file.originalname,
+      tipo: file.mimetype,
+      tamano: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+    };
+  }
 
   @Post('documentos')
   @UseGuards(ModulesGuard)

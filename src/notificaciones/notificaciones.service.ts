@@ -21,9 +21,7 @@ export class NotificacionesService {
 
     // Si es ADMIN o SUPERVISOR, puede ver todas, si no, solo las suyas
     const where: any =
-      rol === 'ADMIN' || rol === 'SUPERVISOR'
-        ? {}
-        : { usuarioId };
+      rol === 'ADMIN' || rol === 'SUPERVISOR' ? {} : { usuarioId };
 
     const [data, total] = await Promise.all([
       this.prisma.notificacion.findMany({
@@ -82,7 +80,8 @@ export class NotificacionesService {
   }
 
   async create(data: any) {
-    // CONTROL DE DUPLICADOS: Verificar si ya existe una notificación idéntica reciente para el usuario
+    // CONTROL DE DUPLICADOS RELAJADO: Solo evitar si es exactamente la misma en la última hora (antes era 24h)
+    // para permitir re-asignaciones rápidas o múltiples tareas similares.
     const duplicate = await this.prisma.notificacion.findFirst({
       where: {
         usuarioId: data.usuarioId,
@@ -90,14 +89,14 @@ export class NotificacionesService {
         mensaje: data.mensaje,
         tipo: data.tipo,
         createdAt: {
-          gte: new Date(Date.now() - 24 * 60 * 60 * 1000), // Evitar duplicados en las últimas 24 horas
+          gte: new Date(Date.now() - 60 * 60 * 1000),
         },
       },
     });
 
     if (duplicate) {
       this.logger.log(
-        `Notificación duplicada omitida para usuario ${data.usuarioId}: ${data.titulo}`,
+        `Notificación duplicada reciente omitida para usuario ${data.usuarioId}`,
       );
       return duplicate;
     }
@@ -116,14 +115,10 @@ export class NotificacionesService {
       },
     });
 
-    // Solo emitir evento SSE si la notificación es para hoy o el pasado (o no tiene fecha programada)
-    const hoy = new Date();
-    const esParaHoyOAntes =
-      !notificacion.fechaProgramada || notificacion.fechaProgramada <= hoy;
-
-    if (esParaHoyOAntes) {
-      this.emitSse(notificacion);
-    }
+    // EMISIÓN INSTANTÁNEA (ERROR CORREGIDO):
+    // Enviamos por SSE inmediatamente para que el usuario la vea en su campana al instante,
+    // aunque la fecha de la tarea sea para el futuro.
+    this.emitSse(notificacion);
 
     return notificacion;
   }

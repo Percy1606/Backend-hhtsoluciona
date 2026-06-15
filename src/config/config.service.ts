@@ -80,9 +80,9 @@ export class ConfigService {
           select: {
             color: true,
             area: true,
-            cargo: true
-          }
-        }
+            cargo: true,
+          },
+        },
       },
     });
 

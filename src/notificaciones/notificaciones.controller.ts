@@ -30,49 +30,78 @@ export class SseAuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const token = request.query.token;
 
+    console.log(
+      '[SseAuthGuard] Intento de conexión SSE. Token presente:',
+      !!token,
+    );
+
     if (!token) {
       console.error('[SseAuthGuard] No se encontró token en la query');
       throw new UnauthorizedException('Token no proporcionado');
     }
-try {
-  const payload = await this.jwtService.verifyAsync(token);
-  request.user = {
-    id: payload.sub,
-    username: payload.username,
-    rol: payload.rol,
-    nombre: payload.nombre,
-    responsable: payload.responsable,
-  };
-  return true;
-} catch (e) {
-  throw new UnauthorizedException('Token inválido o expirado');
-}
-}
+    try {
+      const payload = await this.jwtService.verifyAsync(token);
+      console.log(
+        '[SseAuthGuard] Token verificado para usuario:',
+        payload.username,
+      );
+      request.user = {
+        id: payload.sub,
+        username: payload.username,
+        rol: payload.rol,
+        nombre: payload.nombre,
+        responsable: payload.responsable,
+      };
+      return true;
+    } catch (e) {
+      console.error('[SseAuthGuard] Error al verificar token:', e.message);
+      throw new UnauthorizedException('Token inválido o expirado');
+    }
+  }
 }
 
 @Controller('notificaciones')
 export class NotificacionesController {
-constructor(
-private readonly notificacionesService: NotificacionesService,
-private eventEmitter: EventEmitter2,
-) {}
+  constructor(
+    private readonly notificacionesService: NotificacionesService,
+    private eventEmitter: EventEmitter2,
+  ) {}
 
-@Sse('stream')
-@UseGuards(SseAuthGuard)
-stream(@Req() req: any): Observable<any> {
-const usuarioId = req.user.id;
+  @Sse('stream')
+  @UseGuards(SseAuthGuard)
+  stream(@Req() req: any): Observable<any> {
+    const usuarioId = req.user.id;
+    console.log(
+      `[SSE] 📡 Nueva conexión establecida para usuario: ${req.user.username} (${usuarioId})`,
+    );
 
     const userStream = fromEvent(
       this.eventEmitter,
       `notification.${usuarioId}`,
-    ).pipe(map((data) => ({ data })));
+    ).pipe(
+      map((data) => {
+        console.log(
+          `[SSE] 📨 Enviando notificación privada a ${req.user.username}:`,
+          (data as any).titulo,
+        );
+        return { data };
+      }),
+    );
 
     const globalStream = fromEvent(
       this.eventEmitter,
       'notification.global',
-    ).pipe(map((data) => ({ data })));
+    ).pipe(
+      map((data) => {
+        console.log(
+          `[SSE] 🌍 Enviando notificación GLOBAL a ${req.user.username}:`,
+          (data as any).titulo,
+        );
+        return { data };
+      }),
+    );
 
-    const heartbeatStream = interval(25000).pipe(
+    const heartbeatStream = interval(15000).pipe(
       map(() => ({ data: { type: 'heartbeat' } })),
     );
 
