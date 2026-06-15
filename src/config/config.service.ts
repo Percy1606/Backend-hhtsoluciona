@@ -122,6 +122,11 @@ export class ConfigService {
       updateData.modulos = dto.modulos;
     }
 
+    // Asegurar que responsableId se maneje correctamente (puede ser null)
+    if (dto.hasOwnProperty('responsableId')) {
+      updateData.responsableId = dto.responsableId;
+    }
+
     return this.prisma.usuario.update({
       where: { id },
       data: updateData,
