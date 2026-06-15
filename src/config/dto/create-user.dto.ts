@@ -29,7 +29,7 @@ export class CreateUserDto {
   activo?: boolean;
 
   @IsOptional()
-  @IsUUID()
+  @IsString()
   responsableId?: string | null;
 
   @IsOptional()
