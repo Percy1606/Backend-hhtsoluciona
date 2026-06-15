@@ -1249,23 +1249,13 @@ export class OperacionesService {
       delete where.endDate;
     }
 
-    // FILTRO POR ROL: Si no es ADMIN ni SUPERVISOR, forzamos que solo vea lo suyo
-    if (user && user.rol !== 'ADMIN' && user.rol !== 'SUPERVISOR') {
-      const responsableId = user.responsable?.id;
-      if (responsableId) {
-        where.tecnicoId = responsableId;
-      } else {
-        // Si no tiene responsable vinculado y no es Admin/Supervisor, no debería ver nada
-        where.tecnicoId = 'NONE';
-      }
-    } else if (
-      user &&
-      (user.rol === 'ADMIN' || user.rol === 'SUPERVISOR') &&
-      filters.tecnicoId
-    ) {
-      // Si es ADMIN/SUPERVISOR y filtró por un técnico específico, lo respetamos
+    // FILTRO POR TÉCNICO: Si se proporciona en los filtros, lo aplicamos
+    if (filters.tecnicoId) {
       where.tecnicoId = filters.tecnicoId;
     }
+    
+    // El resto de filtros ya están en 'where' por { ...filters }
+
 
     const [data, total, pending, completed] = await Promise.all([
       this.prisma.fichaTecnica.findMany({
@@ -1294,6 +1284,13 @@ export class OperacionesService {
   }
 
   async updateFicha(id: string, dto: any, user?: any) {
+    // 0. Obtener estado actual para notificaciones
+    const currentFicha = await this.prisma.fichaTecnica.findUnique({
+      where: { id },
+      include: { tecnico: true, cliente: true },
+    });
+    if (!currentFicha) throw new NotFoundException('Ficha no encontrada');
+
     const { adjuntos, datosTecnicos, ...rest } = dto;
     const data: any = {
       ...rest,
@@ -1337,6 +1334,58 @@ export class OperacionesService {
         detalles: { fichaId: id, cliente: updatedFicha.cliente.empresa },
       });
     }
+
+    // TRIGGER: Notificaciones por cambio de Técnico o Fecha
+    const tecnicoCambiado =
+      dto.tecnicoId && dto.tecnicoId !== currentFicha.tecnicoId;
+    const fechaCambiada =
+      dto.fechaVisita &&
+      new Date(dto.fechaVisita).getTime() !==
+        new Date(currentFicha.fechaVisita).getTime();
+
+    if (tecnicoCambiado || fechaCambiada) {
+      // Si el técnico cambió, notificamos al nuevo. Si solo cambió la fecha, al actual.
+      const targetTecnicoId = dto.tecnicoId || currentFicha.tecnicoId;
+      const userTecnico = await this.prisma.usuario.findUnique({
+        where: { responsableId: targetTecnicoId },
+      });
+
+      if (userTecnico) {
+        const nuevaFecha = dto.fechaVisita
+          ? new Date(dto.fechaVisita)
+          : currentFicha.fechaVisita;
+        const fechaFmt = nuevaFecha.toLocaleString('es-PE', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+
+        let titulo = 'Actualización de Visita Técnica';
+        let mensaje = `La visita para ${currentFicha.cliente.empresa} ha sido actualizada. Fecha: ${fechaFmt}.`;
+
+        if (tecnicoCambiado) {
+          titulo = 'Nueva Visita Técnica Reasignada';
+          mensaje = `Se le ha reasignado una visita técnica para el cliente ${currentFicha.cliente.empresa}. Programada para: ${fechaFmt}. Por favor, revise su bandeja técnica.`;
+        } else if (fechaCambiada) {
+          titulo = 'Cambio de Fecha de Visita';
+          mensaje = `La fecha de su visita para ${currentFicha.cliente.empresa} ha cambiado a: ${fechaFmt}.`;
+        }
+
+        await this.notificacionesService.create({
+          usuarioId: userTecnico.id,
+          titulo,
+          mensaje,
+          tipo: 'TECNICO',
+          fechaProgramada: nuevaFecha,
+        });
+        console.log(
+          `[Operaciones] Notificación enviada por actualización de ficha a técnico ${userTecnico.nombre}`,
+        );
+      }
+    }
+
 
     // TRIGGER: Notificaciones y Actualización CRM al completar la ficha
     if (dto.estado === 'COMPLETADA') {

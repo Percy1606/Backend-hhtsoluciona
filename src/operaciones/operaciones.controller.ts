@@ -366,6 +366,7 @@ export class OperacionesController {
   }
 
   @Get('fichas-tecnicas')
+  @Modules('operaciones')
   findAllFichas(
     @Req() req: any,
     @Query('page') page: string = '1',
