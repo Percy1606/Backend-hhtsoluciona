@@ -28,9 +28,8 @@ export class CreateUserDto {
   @IsOptional()
   activo?: boolean;
 
-  @ValidateIf((o) => o.responsableId !== null && o.responsableId !== '')
-  @IsUUID()
   @IsOptional()
+  @IsUUID()
   responsableId?: string | null;
 
   @IsOptional()
