@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateCotizacionDto } from './dto/create-cotizacion.dto';
 import { UpdateCotizacionDto } from './dto/update-cotizacion.dto';
 import { NotificacionesService } from '../notificaciones/notificaciones.service';
+import { FinanzasService } from '../finanzas/finanzas.service';
 import { deletePhysicalFiles } from '../common/utils/file-utils';
 
 @Injectable()
@@ -14,6 +15,7 @@ export class CotizacionesService {
   constructor(
     private prisma: PrismaService,
     private notificacionesService: NotificacionesService,
+    private finanzasService: FinanzasService,
   ) {}
 
   async create(dto: CreateCotizacionDto) {
@@ -31,7 +33,16 @@ export class CotizacionesService {
         });
       }
 
-      const { fileUrl, fileName, fileType, fecha, alcance, ...quoteData } = dto;
+      const {
+        fileUrl,
+        fileName,
+        fileType,
+        fecha,
+        alcance,
+        cajaId,
+        hitos,
+        ...quoteData
+      } = dto;
       const codigo = await this.generateCode();
 
       // Normalización de datos para Prisma
@@ -40,6 +51,16 @@ export class CotizacionesService {
         codigo,
         fecha: fecha ? new Date(fecha) : new Date(),
         alcance: alcance || [],
+        hitosPago: {
+          create:
+            hitos?.map((h) => ({
+              descripcion: h.descripcion,
+              porcentaje: Number(h.porcentaje),
+              monto: Number(h.monto),
+              fechaEstimada: h.fechaEstimada ? new Date(h.fechaEstimada) : null,
+              estado: h.estado || 'PENDIENTE',
+            })) || [],
+        },
         documentos: {
           create: fileUrl
             ? [
@@ -60,15 +81,43 @@ export class CotizacionesService {
         JSON.stringify(data, null, 2),
       );
 
-      const cotizacion = await this.prisma.cotizacion.create({
-        data,
-        include: {
-          cliente: true,
-          documentos: true,
-        },
+      const cotizacion = await this.prisma.$transaction(async (tx) => {
+        const result = await tx.cotizacion.create({
+          data,
+          include: {
+            cliente: true,
+            documentos: true,
+            hitosPago: true,
+          },
+        });
+
+        // LÓGICA DE INTEGRACIÓN FINANCIERA (CAJA) - Se ejecuta si hay hitos COBRADOS
+        const montoObjetivo = result.hitosPago
+          .filter((h: any) => h.estado === 'COBRADO')
+          .reduce((sum: number, h: any) => sum + Number(h.monto), 0);
+
+        if (montoObjetivo > 0) {
+          if (!cajaId) {
+            throw new BadRequestException('Debe seleccionar una caja de destino para registrar el cobro de los hitos.');
+          }
+
+          const conceptoText = `Cobro Inicial Cotización: ${result.codigo} | Monto Cobrado: S/ ${montoObjetivo} | Cliente: ${result.cliente?.empresa}`;
+
+          await this.finanzasService.sincronizarSaldoIngreso(
+            tx,
+            montoObjetivo,
+            cajaId,
+            conceptoText,
+            'COTIZACION',
+            result.id,
+            'SISTEMA'
+          );
+        }
+
+        return result;
       });
 
-      // TRIGGER AUTOMÁTICO: Mover a "Cotización Enviada" (Error Solicitado)
+      // TRIGGER AUTOMÁTICO: Mover a "Cotización Enviada"
       try {
         await this.prisma.cliente.update({
           where: { id: cotizacion.clientId },
@@ -89,10 +138,6 @@ export class CotizacionesService {
             usuario: 'SISTEMA',
           },
         });
-
-        console.log(
-          `[Cotizaciones] Cliente ${cotizacion.cliente?.empresa} movido automáticamente a "Cotización Enviada"`,
-        );
       } catch (triggerError) {
         console.error(
           '[Cotizaciones] Error en trigger de actualización de etapa:',
@@ -111,7 +156,7 @@ export class CotizacionesService {
     }
   }
 
-  async update(id: string, dto: UpdateCotizacionDto) {
+  async update(id: string, dto: any, user?: any) {
     const oldQuote = await this.prisma.cotizacion.findUnique({
       where: { id },
       include: { cliente: true, documentos: true },
@@ -121,7 +166,16 @@ export class CotizacionesService {
       throw new NotFoundException(`Cotización con ID "${id}" no encontrada.`);
     }
 
-    const { fileUrl, fileName, fileType, fecha, alcance, ...quoteData } = dto;
+    const {
+      fileUrl,
+      fileName,
+      fileType,
+      fecha,
+      alcance,
+      cajaId,
+      hitos,
+      ...quoteData
+    } = dto;
 
     // Preparar datos para la actualización de la cotización
     const updateData: any = {
@@ -129,6 +183,19 @@ export class CotizacionesService {
       fecha: fecha ? new Date(fecha) : undefined,
       alcance: alcance !== undefined ? alcance : undefined,
     };
+
+    if (hitos) {
+      updateData.hitosPago = {
+        deleteMany: {},
+        create: hitos.map((h: any) => ({
+          descripcion: h.descripcion,
+          porcentaje: Number(h.porcentaje),
+          monto: Number(h.monto),
+          fechaEstimada: h.fechaEstimada ? new Date(h.fechaEstimada) : null,
+          estado: h.estado || 'PENDIENTE',
+        })),
+      };
+    }
 
     // Si se subió un nuevo archivo, lo agregamos a los documentos de la cotización e incrementamos la versión
     if (fileUrl) {
@@ -148,17 +215,87 @@ export class CotizacionesService {
       };
     }
 
-    const updated = await this.prisma.cotizacion.update({
-      where: { id },
-      data: updateData,
-      include: {
-        cliente: true,
-        documentos: true,
-      },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.cotizacion.update({
+        where: { id },
+        data: updateData,
+        include: {
+          cliente: true,
+          documentos: true,
+          hitosPago: true,
+        },
+      });
+
+      // LÓGICA DE INTEGRACIÓN FINANCIERA (CAJA)
+      // Se sincroniza siempre que haya hitos COBRADOS o esté aprobada
+      
+      // Calcular cuánto ya se ingresó considerando ingresos y egresos
+      const transacciones = await tx.transaccionCaja.findMany({
+        where: {
+          referenciaTipo: 'COTIZACION',
+          referenciaId: id
+        }
+      });
+
+      let saldoIngresado = 0;
+      for (const t of transacciones) {
+        if (t.tipo === 'INGRESO') saldoIngresado += Number(t.monto);
+        if (t.tipo === 'EGRESO') saldoIngresado -= Number(t.monto);
+      }
+
+      // El monto a sincronizar depende de los hitos cobrados
+      let montoObjetivo = 0;
+      if (result.hitosPago && result.hitosPago.length > 0) {
+        montoObjetivo = result.hitosPago
+          .filter((h: any) => h.estado === 'COBRADO')
+          .reduce((sum: number, h: any) => sum + Number(h.monto), 0);
+      } else if (['Aprobado', 'Aprobada'].includes(result.estado)) {
+        montoObjetivo = Number(result.monto);
+      }
+
+      const diferencia = montoObjetivo - saldoIngresado;
+
+      if (diferencia !== 0) {
+        if (!cajaId) {
+          throw new BadRequestException('Debe seleccionar una caja de destino/origen para registrar el cobro o ajuste de dinero.');
+        }
+
+        const proyectoRelacionado = await tx.proyecto.findFirst({
+          where: { cotizacionOrigen: { id: result.id } }
+        });
+        const nombreProyecto = proyectoRelacionado?.nombre || 'Sin proyecto asignado';
+
+        const signo = diferencia > 0 ? '+' : '-';
+        const conceptoText = `Ajuste Cotización: ${result.codigo} | Cobrado anterior: S/ ${saldoIngresado} | Nuevo Cobrado: S/ ${montoObjetivo} | Ajuste: ${signo}S/ ${Math.abs(diferencia)} | Proyecto: ${nombreProyecto}`;
+
+        if (diferencia > 0) {
+          await this.finanzasService.sincronizarSaldoIngreso(
+            tx,
+            diferencia,
+            cajaId,
+            conceptoText,
+            'COTIZACION',
+            result.id,
+            user?.id || 'SISTEMA'
+          );
+        } else {
+          await this.finanzasService.sincronizarSaldoEgreso(
+            tx,
+            Math.abs(diferencia),
+            cajaId,
+            conceptoText,
+            'COTIZACION',
+            result.id,
+            user?.id || 'SISTEMA'
+          );
+        }
+      }
+
+      return result;
     });
 
     // TRIGGER: Notificación de Venta Cerrada y Actualización de Cliente
-    if (dto.estado === 'Aprobado' && oldQuote.estado !== 'Aprobado') {
+    if (['Aprobado', 'Aprobada'].includes(dto.estado) && !['Aprobado', 'Aprobada'].includes(oldQuote.estado)) {
       try {
         // 1. Actualizar Etapa del Cliente a "Ganado"
         await this.prisma.cliente.update({
@@ -227,6 +364,7 @@ export class CotizacionesService {
           documentos: true,
           interacciones: true,
           proyectoGenerado: true,
+          hitosPago: true,
         },
         orderBy: { fechaCreacion: 'desc' },
         skip,
@@ -252,6 +390,7 @@ export class CotizacionesService {
         documentos: true,
         interacciones: true,
         proyectoGenerado: true,
+        hitosPago: true,
       },
     });
     if (!cotizacion) {

@@ -46,6 +46,8 @@ export class CrmController {
     @Query('asignadoA') asignadoA?: string,
     @Query('clasificacion') clasificacion?: string,
     @Query('estado') estado?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ) {
     return this.crmService.findAllClientes(
       +page,
@@ -57,6 +59,8 @@ export class CrmController {
         asignadoA,
         clasificacion,
         estado,
+        startDate,
+        endDate,
       },
       req.user,
     );

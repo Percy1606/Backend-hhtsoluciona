@@ -5,6 +5,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CreateInsumoDto } from './dto/create-insumo.dto';
 import { CreateProveedorDto } from './dto/create-proveedor.dto';
 import { CreateOrdenCompraDto } from './dto/create-orden-compra.dto';
@@ -20,7 +21,10 @@ import { deletePhysicalFiles } from '../common/utils/file-utils';
 
 @Injectable()
 export class LogisticaService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private eventEmitter: EventEmitter2,
+  ) {}
 
   // ============================================
   // PROVEEDORES
@@ -206,12 +210,13 @@ export class LogisticaService {
       );
     }
 
-    // VERIFICAR DISPONIBILIDAD DE FONDOS (CAJA PRINCIPAL POR DEFECTO)
-    const caja = await this.prisma.caja.findFirst();
-    if (caja && Number(caja.saldoDisponible) < montoTotal) {
-      throw new BadRequestException(
-        `Fondos insuficientes en ${caja.nombre} (Disponible: S/ ${caja.saldoDisponible}). No se puede crear la Orden de Compra por S/ ${montoTotal}.`,
-      );
+    // BUSCAR CAJA PARA VINCULAR (Prioridad: Principal o Soles)
+    let caja = await this.prisma.caja.findFirst({
+      where: { OR: [{ nombre: { contains: 'Principal' } }, { moneda: 'PEN' }] }
+    });
+    
+    if (!caja) {
+      caja = await this.prisma.caja.findFirst();
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -238,7 +243,7 @@ export class LogisticaService {
       });
 
       // 1. CREAR EL GASTO VINCULADO PARA QUE FINANZAS LO APRUEBE
-      await tx.gasto.create({
+      const gasto = await tx.gasto.create({
         data: {
           codigo: `OC-${orden.codigo}`,
           proveedorId: orden.proveedorId,
@@ -252,6 +257,9 @@ export class LogisticaService {
           montoTotal: montoTotal,
           saldoPendiente: montoTotal,
           estado: EstadoGasto.PENDIENTE,
+          nivelAprobacion: 'PENDIENTE_FINANZAS',
+          solicitanteId: userId,
+          area: 'LogisticaYRecursos',
           fechaEmision: new Date(),
           registradoPorId: userId,
         } as any,
@@ -284,6 +292,7 @@ export class LogisticaService {
           } as any,
         });
       }
+
 
       return orden;
     });
@@ -591,7 +600,7 @@ export class LogisticaService {
       });
 
       // 2. Crear movimiento de salida con costo histórico (ERROR 3)
-      return tx.movimientoAlmacen.create({
+      const movimiento = await tx.movimientoAlmacen.create({
         data: {
           insumoId: data.insumoId,
           tipo: TipoMovimiento.SALIDA,
@@ -602,6 +611,14 @@ export class LogisticaService {
           usuarioId: data.usuarioId,
         } as any,
       });
+
+      if (data.proyectoId) {
+        this.eventEmitter.emit('proyecto.costChanged', {
+          proyectoId: data.proyectoId,
+        });
+      }
+
+      return movimiento;
     });
   }
 

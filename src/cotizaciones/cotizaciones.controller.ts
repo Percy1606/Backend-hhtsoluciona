@@ -100,8 +100,9 @@ export class CotizacionesController {
   update(
     @Param('id') id: string,
     @Body() updateCotizacionDto: UpdateCotizacionDto,
+    @Req() req: any,
   ) {
-    return this.cotizacionesService.update(id, updateCotizacionDto);
+    return this.cotizacionesService.update(id, updateCotizacionDto, req.user);
   }
 
   @Delete(':id')

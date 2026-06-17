@@ -12,6 +12,9 @@ import {
   TipoGasto,
   ClasificacionFinanciera,
   CategoriaDistribucion,
+  Area,
+  NivelAprobacion,
+  PrioridadGasto,
 } from '@prisma/client';
 
 export class CreateGastoDto {
@@ -51,6 +54,14 @@ export class CreateGastoDto {
   @IsNotEmpty()
   concepto: string;
 
+  @IsString()
+  @IsOptional()
+  justificacion?: string;
+
+  @IsEnum(Area)
+  @IsOptional()
+  area?: Area;
+
   @IsNumber()
   @IsNotEmpty()
   montoTotal: number;
@@ -63,11 +74,35 @@ export class CreateGastoDto {
   @IsOptional()
   fechaVencimiento?: string;
 
+  @IsDateString()
+  @IsOptional()
+  fechaProgramadaPago?: string;
+
   @IsEnum(EstadoGasto)
   @IsOptional()
   estado?: EstadoGasto;
 
+  @IsEnum(PrioridadGasto)
+  @IsOptional()
+  prioridad?: PrioridadGasto;
+
   @IsString()
   @IsOptional()
   comprobanteUrl?: string;
+
+  @IsUUID()
+  @IsOptional()
+  solicitanteId?: string;
+
+  @IsUUID()
+  @IsOptional()
+  aprobadorFinanzasId?: string;
+
+  @IsUUID()
+  @IsOptional()
+  aprobadorGerenciaId?: string;
+
+  @IsEnum(NivelAprobacion)
+  @IsOptional()
+  nivelAprobacion?: NivelAprobacion;
 }

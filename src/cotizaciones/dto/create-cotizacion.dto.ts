@@ -1,13 +1,20 @@
-import { IsString, IsOptional, IsNumber, IsDateString } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsDateString, IsArray, ValidateNested, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
+import { CreateHitoPagoDto } from './create-hito-pago.dto';
 
 export class CreateCotizacionDto {
   @IsString()
   clientId: string;
 
   @IsNumber()
+  @Min(0, { message: 'El monto no puede ser negativo.' })
+  @Max(1000000000, { message: 'El monto no puede exceder los 1,000 millones.' })
   @Type(() => Number)
   monto: number;
+
+  @IsString()
+  @IsOptional()
+  moneda?: string;
 
   @IsString()
   estado: string;
@@ -53,6 +60,10 @@ export class CreateCotizacionDto {
 
   @IsOptional()
   @IsString()
+  cajaId?: string;
+
+  @IsOptional()
+  @IsString()
   fileUrl?: string;
 
   @IsOptional()
@@ -71,4 +82,10 @@ export class CreateCotizacionDto {
   @IsOptional()
   @IsString()
   cotizacionPadreId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateHitoPagoDto)
+  hitos?: CreateHitoPagoDto[];
 }

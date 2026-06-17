@@ -13,12 +13,16 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { FinanzasService } from './finanzas.service';
+import { CashFlowService } from './cash-flow.service';
 import { AuthService } from '../auth/auth.service';
 import { CreateFacturaDto } from './dto/create-factura.dto';
 import { CreatePagoDto } from './dto/create-pago.dto';
 import { CreateGastoDto } from './dto/create-gasto.dto';
+import { CreateRendicionDto } from './dto/create-rendicion.dto';
 import { UpdateGastoDto } from './dto/update-gasto.dto';
 import { UpdateFacturaDto } from './dto/update-factura.dto';
+import { CreateConfigAprobacionDto } from './dto/create-config-aprobacion.dto';
+import { SubmitAprobacionDto } from './dto/submit-aprobacion.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ModulesGuard } from '../auth/modules.guard';
 import { Modules } from '../auth/modules.decorator';
@@ -28,8 +32,61 @@ import { Modules } from '../auth/modules.decorator';
 export class FinanzasController {
   constructor(
     private readonly finanzasService: FinanzasService,
+    private readonly cashFlowService: CashFlowService,
     private readonly authService: AuthService,
   ) {}
+
+  @Get('forecast')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  getForecast() {
+    return this.cashFlowService.getForecast();
+  }
+
+  @Get('aging')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  getAging() {
+    return this.cashFlowService.getAgingReport();
+  }
+
+  // ============================================
+  // APROBACIONES
+  // ============================================
+
+  @Get('aprobaciones/pendientes')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  findPendingApprovals(@Req() req: any) {
+    const usuarioId = req.user.id || 'system';
+    return this.finanzasService.findPendingApprovals(usuarioId);
+  }
+
+  @Post('gastos/:id/aprobar-config')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  submitApproval(
+    @Param('id') id: string,
+    @Body() dto: SubmitAprobacionDto,
+    @Req() req: any,
+  ) {
+    const usuarioId = req.user.id || 'system';
+    return this.finanzasService.submitAprobacionGasto(id, usuarioId, dto);
+  }
+
+  @Post('configuraciones/aprobacion')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  createConfigAprobacion(@Body() dto: CreateConfigAprobacionDto) {
+    return this.finanzasService.createConfigAprobacion(dto);
+  }
+
+  @Get('configuraciones/aprobacion')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  findAllConfigsAprobacion() {
+    return this.finanzasService.findAllConfigsAprobacion();
+  }
 
   @Get('dashboard-stats')
   @UseGuards(ModulesGuard)
@@ -206,6 +263,33 @@ export class FinanzasController {
         'La contraseña de administrador es incorrecta.',
       );
     return this.finanzasService.deleteGasto(id);
+  }
+
+  @Post('gastos/:id/aprobar')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  approveGasto(@Req() req: any, @Param('id') id: string) {
+    const usuarioId = req.user.id || req.user.sub || 'system';
+    return this.finanzasService.approveGasto(id, usuarioId);
+  }
+
+  // ============================================
+  // RENDICIONES
+  // ============================================
+
+  @Get('gastos/:id/rendiciones')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas', 'operaciones', 'logistica')
+  findRendicionesByGasto(@Param('id') id: string) {
+    return this.finanzasService.findRendicionesByGasto(id);
+  }
+
+  @Post('rendiciones')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas', 'operaciones', 'logistica')
+  createRendicion(@Req() req: any, @Body() dto: CreateRendicionDto) {
+    const usuarioId = req.user.id || req.user.sub || 'system';
+    return this.finanzasService.createRendicion(dto, usuarioId);
   }
 
   // ============================================

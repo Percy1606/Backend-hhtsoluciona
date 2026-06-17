@@ -4,21 +4,32 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CreateFacturaDto } from './dto/create-factura.dto';
 import { UpdateFacturaDto } from './dto/update-factura.dto';
 import { CreatePagoDto } from './dto/create-pago.dto';
 import { CreateGastoDto } from './dto/create-gasto.dto';
+import { UpdateGastoDto } from './dto/update-gasto.dto';
+import { CreateRendicionDto } from './dto/create-rendicion.dto';
+import { CreateConfigAprobacionDto } from './dto/create-config-aprobacion.dto';
+import { SubmitAprobacionDto } from './dto/submit-aprobacion.dto';
 import {
   TipoGasto,
   ClasificacionFinanciera,
   CategoriaDistribucion,
   EstadoGasto,
+  NivelAprobacion,
+  EstadoRendicion,
+  PrioridadGasto,
 } from '@prisma/client';
 import { deletePhysicalFiles } from '../common/utils/file-utils';
 
 @Injectable()
 export class FinanzasService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private eventEmitter: EventEmitter2,
+  ) {}
 
   private async checkCajaAccess(
     cajaId: string,
@@ -109,9 +120,106 @@ export class FinanzasService {
       } as any,
     });
 
+    // 4. PROVISIÓN AUTOMÁTICA
+    await this.handleAutomaticProvision(
+      tx,
+      targetCajaId,
+      monto,
+      usuarioId,
+      'FACTURA',
+      facturaId,
+    );
+
     console.log(
       `[SALDOS-SYNC] ✅ Sincronización exitosa en caja: ${dbCaja.nombre}. Nuevo Saldo: ${nuevoReal}`,
     );
+  }
+
+  private async handleAutomaticProvision(
+    tx: any,
+    cajaOrigenId: string,
+    montoIngresado: number,
+    usuarioId: string,
+    referenciaTipo: string,
+    referenciaId: string,
+  ) {
+    const cajaOrigen = await tx.caja.findUnique({ where: { id: cajaOrigenId } });
+    if (!cajaOrigen || Number(cajaOrigen.porcentajeProvision) <= 0) return;
+
+    const montoAhorro =
+      Math.round(
+        montoIngresado * (Number(cajaOrigen.porcentajeProvision) / 100) * 100,
+      ) / 100;
+    if (montoAhorro <= 0) return;
+
+    // Buscar la caja de OBLIGACIONES principal
+    const cajaDestino = await tx.caja.findFirst({
+      where: { subtipo: 'OBLIGACIONES', esPrincipal: true },
+    });
+
+    if (!cajaDestino) {
+      console.warn(
+        '[PROVISIÓN] No se encontró una caja de OBLIGACIONES principal para el ahorro automático.',
+      );
+      return;
+    }
+
+    if (cajaOrigen.id === cajaDestino.id) return;
+
+    console.log(
+      `[PROVISIÓN] Iniciando provisión automática de ${montoAhorro} (${cajaOrigen.porcentajeProvision}%) desde ${cajaOrigen.nombre} hacia ${cajaDestino.nombre}`,
+    );
+
+    // Ejecutar transferencia interna
+    // 1. Descontar de Origen
+    const nuevoRealOrigen = Number(cajaOrigen.saldoReal) - montoAhorro;
+    await tx.caja.update({
+      where: { id: cajaOrigen.id },
+      data: {
+        saldoReal: nuevoRealOrigen,
+        saldoDisponible: nuevoRealOrigen - Number(cajaOrigen.saldoComprometido),
+      },
+    });
+
+    // 2. Aumentar en Destino
+    const nuevoRealDestino = Number(cajaDestino.saldoReal) + montoAhorro;
+    await tx.caja.update({
+      where: { id: cajaDestino.id },
+      data: {
+        saldoReal: nuevoRealDestino,
+        saldoDisponible:
+          nuevoRealDestino - Number(cajaDestino.saldoComprometido),
+      },
+    });
+
+    // 3. Registrar Transacciones de Auditoría
+    await tx.transaccionCaja.create({
+      data: {
+        cajaId: cajaOrigen.id,
+        tipo: 'EGRESO',
+        monto: montoAhorro,
+        concepto: `PROVISIÓN AUTOMÁTICA (${cajaOrigen.porcentajeProvision}%): Ahorro para Obligaciones`,
+        referenciaTipo,
+        referenciaId,
+        usuarioId,
+        saldoRealPrevio: Number(cajaOrigen.saldoReal),
+        saldoRealNuevo: nuevoRealOrigen,
+      } as any,
+    });
+
+    await tx.transaccionCaja.create({
+      data: {
+        cajaId: cajaDestino.id,
+        tipo: 'INGRESO',
+        monto: montoAhorro,
+        concepto: `INGRESO POR PROVISIÓN: Ahorro desde ${cajaOrigen.nombre}`,
+        referenciaTipo,
+        referenciaId,
+        usuarioId,
+        saldoRealPrevio: Number(cajaDestino.saldoReal),
+        saldoRealNuevo: nuevoRealDestino,
+      } as any,
+    });
   }
 
   private async handleLogisticsAutomation(
@@ -146,6 +254,107 @@ export class FinanzasService {
         } as any,
       });
     }
+  }
+
+  // ============================================
+  // UTILIDAD: Sincronización Directa de Ingreso (Desde otros módulos)
+  // ============================================
+  async sincronizarSaldoIngreso(
+    tx: any,
+    monto: number,
+    cajaId: string,
+    concepto: string,
+    referenciaTipo: string,
+    referenciaId: string,
+    usuarioId: string
+  ) {
+    const dbCaja = await tx.caja.findUnique({ where: { id: cajaId } });
+    
+    if (!dbCaja) {
+      throw new BadRequestException('La caja de destino no existe.');
+    }
+
+    if (dbCaja.esProtegida) {
+      throw new BadRequestException(
+        'Esta caja está BLOQUEADA (Bóveda Blindada). No se permiten ingresos automáticos aquí.',
+      );
+    }
+
+    const nuevoReal = Number(dbCaja.saldoReal) + monto;
+    
+    await tx.caja.update({
+      where: { id: cajaId },
+      data: {
+        saldoReal: nuevoReal,
+        saldoDisponible: nuevoReal - Number(dbCaja.saldoComprometido),
+      },
+    });
+
+    await tx.transaccionCaja.create({
+      data: {
+        cajaId: cajaId,
+        tipo: 'INGRESO',
+        monto: monto,
+        concepto: concepto,
+        referenciaTipo: referenciaTipo,
+        referenciaId: referenciaId,
+        usuarioId: usuarioId,
+        saldoRealPrevio: Number(dbCaja.saldoReal),
+        saldoRealNuevo: nuevoReal,
+      },
+    });
+  }
+
+  async sincronizarSaldoEgreso(
+    tx: any,
+    monto: number,
+    cajaId: string,
+    concepto: string,
+    referenciaTipo: string,
+    referenciaId: string,
+    usuarioId: string
+  ) {
+    const dbCaja = await tx.caja.findUnique({ where: { id: cajaId } });
+    
+    if (!dbCaja) {
+      throw new BadRequestException('La caja de origen no existe.');
+    }
+
+    if (dbCaja.esProtegida) {
+      throw new BadRequestException(
+        'Esta caja está BLOQUEADA (Bóveda Blindada). No se permiten egresos automáticos aquí.',
+      );
+    }
+
+    if (Number(dbCaja.saldoDisponible) < monto) {
+      throw new BadRequestException(
+        `Saldo insuficiente en la caja "${dbCaja.nombre}" para realizar este ajuste negativo.`,
+      );
+    }
+
+    const nuevoReal = Number(dbCaja.saldoReal) - monto;
+    
+    await tx.caja.update({
+      where: { id: cajaId },
+      data: {
+        saldoReal: nuevoReal,
+        saldoDisponible: nuevoReal - Number(dbCaja.saldoComprometido),
+      },
+    });
+
+    await tx.transaccionCaja.create({
+      data: {
+        cajaId: cajaId,
+        tipo: 'EGRESO',
+        monto: monto,
+        concepto: concepto,
+        referenciaTipo: referenciaTipo,
+        referenciaId: referenciaId,
+        usuarioId: usuarioId,
+        saldoRealPrevio: Number(dbCaja.saldoReal),
+        saldoRealNuevo: nuevoReal,
+      },
+    });
   }
 
   // ============================================
@@ -234,6 +443,9 @@ export class FinanzasService {
             ? new Date(dto.fechaEmision)
             : new Date(),
           fechaVencimiento: new Date(dto.fechaVencimiento),
+          fechaEstimadaCobro: dto.fechaEstimadaCobro
+            ? new Date(dto.fechaEstimadaCobro)
+            : null,
           estado: estadoFinal,
           observaciones: dto.observaciones || null,
           archivoUrl: dto.archivoUrl || null,
@@ -372,8 +584,13 @@ export class FinanzasService {
 
     const fechaEmision = dto.fechaEmision;
     const fechaVencimiento = dto.fechaVencimiento;
+    const fechaEstimadaCobro = dto.fechaEstimadaCobro;
     if (fechaEmision) data.fechaEmision = new Date(fechaEmision);
     if (fechaVencimiento) data.fechaVencimiento = new Date(fechaVencimiento);
+    if (fechaEstimadaCobro !== undefined)
+      data.fechaEstimadaCobro = fechaEstimadaCobro
+        ? new Date(fechaEstimadaCobro)
+        : null;
 
     const total =
       dto.montoTotal !== undefined
@@ -568,6 +785,16 @@ export class FinanzasService {
             saldoRealNuevo: nuevoReal,
           } as any,
         });
+
+        // 4. PROVISIÓN AUTOMÁTICA
+        await this.handleAutomaticProvision(
+          tx,
+          targetCajaId,
+          Number(pago.monto),
+          usuarioId,
+          'FACTURA',
+          facturaPrincipal.id,
+        );
       }
 
       montoRestante =
@@ -624,30 +851,44 @@ export class FinanzasService {
   // ============================================
 
   async createGasto(dto: CreateGastoDto, usuarioId: string) {
-    const targetCajaId = dto.cajaId || (await this.prisma.caja.findFirst())?.id;
+    // Buscar Caja Principal o PEN por defecto si no se especifica
+    let targetCajaId = dto.cajaId;
+    
+    if (!targetCajaId || targetCajaId === 'none' || targetCajaId === '') {
+      const preferredCaja = await this.prisma.caja.findFirst({
+        where: { OR: [{ nombre: { contains: 'Principal' } }, { moneda: 'PEN' }] }
+      });
+      targetCajaId = preferredCaja?.id;
+    }
 
     if (targetCajaId) {
       await this.checkCajaAccess(targetCajaId, usuarioId, 'realizar gastos');
     }
 
-    await this.checkAvailability(
-      Number(dto.montoTotal),
-      targetCajaId || undefined,
-    );
+    const monto = Number(dto.montoTotal);
+    const nivelAprobacion: NivelAprobacion = 'PENDIENTE_FINANZAS';
+
     const data: any = {
       ...dto,
       registradoPorId: usuarioId,
+      solicitanteId: dto.solicitanteId || usuarioId,
+      nivelAprobacion,
       fechaEmision: new Date(dto.fechaEmision),
       fechaVencimiento: dto.fechaVencimiento
         ? new Date(dto.fechaVencimiento)
         : null,
-      saldoPendiente: Number(dto.montoTotal),
+      fechaProgramadaPago: dto.fechaProgramadaPago
+        ? new Date(dto.fechaProgramadaPago)
+        : null,
+      prioridad: dto.prioridad || 'MEDIA',
+      saldoPendiente: monto,
+      estado: 'PENDIENTE',
     };
 
     if (data.proveedorId === '') data.proveedorId = null;
     if (data.proyectoId === '') data.proyectoId = null;
     if (data.ordenCompraId === '') data.ordenCompraId = null;
-    if (data.cajaId === '') data.cajaId = null;
+    data.cajaId = (targetCajaId === '' || targetCajaId === 'none') ? null : targetCajaId;
 
     return this.prisma.$transaction(async (tx) => {
       const gasto = await tx.gasto.create({
@@ -655,7 +896,8 @@ export class FinanzasService {
         include: { proveedor: true, proyecto: true },
       });
 
-      if (gasto.estado === 'PENDIENTE') {
+      // Intentar bloquear fondos, pero no fallar si no hay (se registra la obligación)
+      try {
         await this.blockFunds(
           Number(gasto.montoTotal),
           `Reserva: ${gasto.concepto}`,
@@ -665,19 +907,16 @@ export class FinanzasService {
           targetCajaId || undefined,
           tx,
         );
-      } else if (gasto.estado === 'PAGADO') {
-        await this.executeExpense(
-          Number(gasto.montoTotal),
-          `Gasto: ${gasto.concepto}`,
-          'GASTO',
-          gasto.id,
-          usuarioId,
-          targetCajaId || undefined,
-          false,
-          tx,
-        );
-        await this.handleLogisticsAutomation(tx, gasto, usuarioId);
+      } catch (e) {
+        console.warn(`[Finanzas] No se pudo bloquear fondos para el gasto ${gasto.id}: ${e.message}`);
       }
+      
+      if (gasto.proyectoId) {
+        this.eventEmitter.emit('proyecto.costChanged', {
+          proyectoId: gasto.proyectoId,
+        });
+      }
+
       return gasto;
     });
   }
@@ -716,6 +955,9 @@ export class FinanzasService {
     if (dto.fechaEmision) data.fechaEmision = new Date(dto.fechaEmision);
     if (dto.fechaVencimiento)
       data.fechaVencimiento = new Date(dto.fechaVencimiento);
+    if (dto.fechaProgramadaPago)
+      data.fechaProgramadaPago = new Date(dto.fechaProgramadaPago);
+    if (dto.prioridad) data.prioridad = dto.prioridad;
 
     if (data.proveedorId === '') data.proveedorId = null;
     if (data.proyectoId === '') data.proyectoId = null;
@@ -746,7 +988,71 @@ export class FinanzasService {
           usuarioId || updatedGasto.registradoPorId,
         );
       }
+
+      if (updatedGasto.proyectoId) {
+        this.eventEmitter.emit('proyecto.costChanged', {
+          proyectoId: updatedGasto.proyectoId,
+        });
+      }
+
       return updatedGasto;
+    });
+  }
+
+  async approveGasto(id: string, usuarioId: string) {
+    const gasto = await this.prisma.gasto.findUnique({
+      where: { id },
+      include: { proyecto: true },
+    });
+    if (!gasto) throw new NotFoundException('Gasto no encontrado');
+
+    const user = await this.prisma.usuario.findUnique({
+      where: { id: usuarioId },
+    });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    const isAdmin = user.rol === 'ADMIN';
+    // SUPERVISOR o ADMIN pueden actuar como Finanzas (Mellani)
+    const canApproveFinanzas = user.rol === 'ADMIN' || user.rol === 'SUPERVISOR';
+
+    return this.prisma.$transaction(async (tx) => {
+      const dataToUpdate: any = {};
+      let needsBlocking = false;
+
+      if (gasto.nivelAprobacion === 'PENDIENTE_FINANZAS' || gasto.nivelAprobacion === 'PENDIENTE_GERENCIA') {
+        if (!canApproveFinanzas) {
+          throw new BadRequestException('No tienes permisos para aprobar solicitudes de fondos.');
+        }
+        dataToUpdate.aprobadorFinanzasId = usuarioId;
+        dataToUpdate.nivelAprobacion = 'APROBADO';
+        
+        // Si por alguna razón el estado no fuera PENDIENTE, lo forzamos y bloqueamos fondos
+        if (gasto.estado !== 'PENDIENTE' && gasto.estado !== 'PAGADO') {
+          dataToUpdate.estado = 'PENDIENTE';
+          needsBlocking = true;
+        }
+      } else {
+        throw new BadRequestException('El gasto ya se encuentra aprobado o en un estado no procesable.');
+      }
+
+      const updated = await tx.gasto.update({
+        where: { id },
+        data: dataToUpdate,
+      });
+
+      if (needsBlocking) {
+        await this.blockFunds(
+          Number(updated.montoTotal),
+          `Reserva: ${updated.concepto}`,
+          'GASTO',
+          updated.id,
+          usuarioId,
+          updated.cajaId || undefined,
+          tx,
+        );
+      }
+
+      return updated;
     });
   }
 
@@ -786,20 +1092,108 @@ export class FinanzasService {
   }
 
   // ============================================
+  // RENDICIONES
+  // ============================================
+
+  async findRendicionesByGasto(gastoId: string) {
+    return this.prisma.rendicion.findMany({
+      where: { gastoId },
+      orderBy: { fecha: 'desc' },
+    });
+  }
+
+  async createRendicion(dto: CreateRendicionDto, usuarioId: string) {
+    const gasto = await this.prisma.gasto.findUnique({
+      where: { id: dto.gastoId },
+      include: { rendiciones: true },
+    });
+
+    if (!gasto) throw new NotFoundException('Gasto no encontrado');
+
+    return this.prisma.$transaction(async (tx) => {
+      const rendicion = await tx.rendicion.create({
+        data: {
+          ...dto,
+          fecha: dto.fecha ? new Date(dto.fecha) : new Date(),
+          registradoPorId: usuarioId,
+        },
+      });
+
+      // Actualizar monto rendido en el gasto
+      const nuevoMontoRendido =
+        Number(gasto.montoRendido || 0) + Number(dto.monto);
+      let nuevoEstadoRendicion: EstadoRendicion = 'PENDIENTE';
+
+      const montoTotalGasto = Number(gasto.montoTotal);
+
+      if (nuevoMontoRendido >= montoTotalGasto) {
+        nuevoEstadoRendicion =
+          nuevoMontoRendido > montoTotalGasto ? 'EXCEDIDA' : 'COMPLETADA';
+      }
+
+      await tx.gasto.update({
+        where: { id: dto.gastoId },
+        data: {
+          montoRendido: nuevoMontoRendido,
+          estadoRendicion: nuevoEstadoRendicion,
+        },
+      });
+
+      // LÓGICA DE AJUSTE DE FONDOS OPERATIVOS
+      // Si el gasto era un FONDO OPERATIVO (Tipo VIATICOS o OPERATIVO) y ya se completó la rendición
+      if (
+        (gasto.tipo === 'VIATICOS' || gasto.tipo === 'OPERATIVO') &&
+        nuevoEstadoRendicion === 'COMPLETADA' &&
+        gasto.cajaId
+      ) {
+        // En un flujo real, si sobró dinero, se devuelve a la caja.
+        // Pero usualmente la rendición es EXACTA al gasto. 
+        // Si hay un saldo a favor de la empresa, registramos un ingreso técnico.
+        console.log(`[RENDICION] Gasto ${gasto.id} completado.`);
+      }
+
+      return rendicion;
+    });
+  }
+
+  // ============================================
   // CAJA (CRUD)
   // ============================================
 
   async createCaja(dto: any) {
-    const { nombre, tipo, saldoReal, esProtegida } = dto;
-    return this.prisma.caja.create({
-      data: {
-        nombre,
-        tipo,
-        esProtegida: esProtegida || false,
-        saldoReal: Number(saldoReal || 0),
-        saldoDisponible: Number(saldoReal || 0),
-        saldoComprometido: 0,
-      },
+    const {
+      nombre,
+      tipo,
+      saldoReal,
+      esProtegida,
+      moneda,
+      subtipo,
+      porcentajeProvision,
+      esPrincipal,
+    } = dto;
+
+    return this.prisma.$transaction(async (tx) => {
+      if (esPrincipal) {
+        await tx.caja.updateMany({
+          where: { subtipo: subtipo || 'OPERATIVA' },
+          data: { esPrincipal: false },
+        });
+      }
+
+      return tx.caja.create({
+        data: {
+          nombre,
+          tipo,
+          subtipo: subtipo || 'OPERATIVA',
+          moneda: moneda || 'PEN',
+          esProtegida: esProtegida || false,
+          esPrincipal: esPrincipal || false,
+          saldoReal: Number(saldoReal || 0),
+          saldoDisponible: Number(saldoReal || 0),
+          saldoComprometido: 0,
+          porcentajeProvision: Number(porcentajeProvision || 0),
+        },
+      });
     });
   }
 
@@ -816,11 +1210,24 @@ export class FinanzasService {
       }
     }
 
-    const { nombre, tipo, saldoReal, motivoAjuste, esProtegida } = dto;
+    const {
+      nombre,
+      tipo,
+      saldoReal,
+      motivoAjuste,
+      esProtegida,
+      subtipo,
+      porcentajeProvision,
+      esPrincipal,
+    } = dto;
     const updateData: any = {};
     if (nombre) updateData.nombre = nombre;
     if (tipo) updateData.tipo = tipo;
+    if (subtipo) updateData.subtipo = subtipo;
+    if (porcentajeProvision !== undefined)
+      updateData.porcentajeProvision = Number(porcentajeProvision);
     if (esProtegida !== undefined) updateData.esProtegida = esProtegida;
+    if (esPrincipal !== undefined) updateData.esPrincipal = esPrincipal;
 
     // Si se ajusta el saldo manualmente, creamos una transacción de ajuste
     if (
@@ -847,9 +1254,18 @@ export class FinanzasService {
       });
     }
 
-    return this.prisma.caja.update({
-      where: { id },
-      data: updateData,
+    return this.prisma.$transaction(async (tx) => {
+      if (esPrincipal) {
+        await tx.caja.updateMany({
+          where: { subtipo: subtipo || current.subtipo },
+          data: { esPrincipal: false },
+        });
+      }
+
+      return tx.caja.update({
+        where: { id },
+        data: updateData,
+      });
     });
   }
 
@@ -973,6 +1389,170 @@ export class FinanzasService {
       orderBy: { nombre: 'asc' },
     });
   }
+
+  async findApprovalConfig(tipo: TipoGasto, monto: number, prioridad: PrioridadGasto) {
+    return this.prisma.configuracionAprobacion.findFirst({
+      where: {
+        tipoGasto: tipo,
+        montoMinimo: { lte: monto },
+        montoMaximo: { gte: monto },
+        prioridad: prioridad,
+        activo: true,
+      },
+    });
+  }
+
+  async submitAprobacionGasto(
+    gastoId: string,
+    usuarioId: string,
+    dto: SubmitAprobacionDto,
+  ) {
+    const gasto = await this.prisma.gasto.findUnique({
+      where: { id: gastoId },
+      include: { aprobaciones: true },
+    });
+    if (!gasto) throw new NotFoundException('Gasto no encontrado');
+
+    const user = await this.prisma.usuario.findUnique({
+      where: { id: usuarioId },
+    });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    // 1. Determinar configuración aplicable
+    const config = await this.findApprovalConfig(
+      gasto.tipo,
+      Number(gasto.montoTotal),
+      gasto.prioridad,
+    );
+
+    if (!config) {
+      // Si no hay config, el ADMIN puede aprobar directamente
+      if (user.rol !== 'ADMIN') {
+        throw new BadRequestException(
+          'No existe una configuración de aprobación para este gasto y no tienes permisos de administrador.',
+        );
+      }
+    }
+
+    const rolesAprobadores = config
+      ? (config.rolesAprobadores as string[])
+      : ['ADMIN'];
+    const nivelActual = gasto.nivelActual;
+
+    // Verificar si el usuario tiene el rol requerido para el nivel actual
+    const rolRequerido = rolesAprobadores[nivelActual];
+
+    if (user.rol !== 'ADMIN' && user.rol !== rolRequerido) {
+      throw new BadRequestException(
+        `Se requiere el rol ${rolRequerido} para este nivel de aprobación. Tu rol es ${user.rol}.`,
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // Registrar la aprobación
+      await tx.aprobacionGasto.create({
+        data: {
+          gastoId,
+          usuarioId,
+          nivel: nivelActual + 1,
+          rol: user.rol,
+          estado: dto.estado,
+          comentario: dto.comentario,
+        },
+      });
+
+      if (dto.estado === 'APROBADO') {
+        const esUltimoNivel = nivelActual + 1 >= rolesAprobadores.length;
+
+        if (esUltimoNivel) {
+          // APROBACIÓN FINAL
+          await tx.gasto.update({
+            where: { id: gastoId },
+            data: {
+              nivelAprobacion: 'APROBADO',
+              estado: 'PENDIENTE', // Listo para pagar
+            },
+          });
+
+          // Bloquear fondos si es necesario
+          await this.blockFunds(
+            Number(gasto.montoTotal),
+            `Reserva Aprobada: ${gasto.concepto}`,
+            'GASTO',
+            gasto.id,
+            usuarioId,
+            gasto.cajaId || undefined,
+            tx,
+          );
+        } else {
+          // AVANZAR AL SIGUIENTE NIVEL
+          await tx.gasto.update({
+            where: { id: gastoId },
+            data: { nivelActual: nivelActual + 1 },
+          });
+        }
+      } else if (dto.estado === 'RECHAZADO') {
+        await tx.gasto.update({
+          where: { id: gastoId },
+          data: {
+            nivelAprobacion: 'RECHAZADO',
+            estado: 'ANULADO',
+          },
+        });
+      }
+
+      return { success: true };
+    });
+  }
+
+  async findPendingApprovals(usuarioId: string) {
+    const user = await this.prisma.usuario.findUnique({
+      where: { id: usuarioId },
+    });
+    if (!user) return [];
+
+    const isSupervisor = user.rol === 'SUPERVISOR';
+    const isAdmin = user.rol === 'ADMIN';
+
+    // Esta es una consulta simplificada. En un entorno real, 
+    // cruzaríamos con ConfiguracionAprobacion para ver si user.rol está en rolesAprobadores[nivelActual]
+    // Por ahora, traemos todos los pendientes de su nivel o donde sea ADMIN.
+
+    const todosPendientes = await this.prisma.gasto.findMany({
+      where: {
+        nivelAprobacion: { in: ['PENDIENTE_FINANZAS', 'PENDIENTE_GERENCIA'] as any },
+        estado: 'PENDIENTE',
+      },
+      include: {
+        proyecto: { select: { nombre: true } },
+        proveedor: { select: { razonSocial: true } },
+      },
+    });
+
+    // Filtro manual basado en la config (para simplicidad en el prototipo)
+    // En producción esto debería ser un query SQL/Prisma directo.
+    return todosPendientes;
+  }
+
+  async createConfigAprobacion(dto: CreateConfigAprobacionDto) {
+    return this.prisma.configuracionAprobacion.create({
+      data: {
+        tipoGasto: dto.tipoGasto,
+        montoMinimo: dto.montoMinimo,
+        montoMaximo: dto.montoMaximo,
+        prioridad: dto.prioridad,
+        rolesAprobadores: dto.rolesAprobadores,
+        activo: dto.activo ?? true,
+      },
+    });
+  }
+
+  async findAllConfigsAprobacion() {
+    return this.prisma.configuracionAprobacion.findMany({
+      orderBy: { montoMinimo: 'asc' },
+    });
+  }
+
 
   async findCajaTransactions(cajaId: string, page = 1, limit = 10) {
     const skip = (page - 1) * limit;
@@ -1508,7 +2088,7 @@ export class FinanzasService {
         Number(f.saldoPendiente) > 0,
     );
 
-    const utilidadNeta = totalCobrado - totalGastosPagados;
+    const utilidadMes = totalCobradoMes - totalGastosPagadosMes;
 
     return {
       totalFacturado,
@@ -1516,13 +2096,13 @@ export class FinanzasService {
       totalPendiente: totalFacturado - totalCobrado,
       totalGastosPagados,
       totalGastosPendientes,
-      utilidadNeta,
-      margenNeto: totalCobrado > 0 ? Number(((utilidadNeta / totalCobrado) * 100).toFixed(1)) : 0,
+      utilidadMes,
+      utilidadNeta: totalCobrado - totalGastosPagados,
+      margenNeto: totalCobrado > 0 ? Number((( (totalCobrado - totalGastosPagados) / totalCobrado) * 100).toFixed(1)) : 0,
       facturasPendientes: facturas.filter((x) => x.estado === 'PENDIENTE').length,
       facturasParciales: facturas.filter((x) => x.estado === 'PAGO_PARCIAL').length,
       facturasVencidas: facturasCriticas.length,
-      crecimientoIngresos: 0, // Mock para la UI por ahora
-      crecimientoEgresos: 0,   // Mock para la UI por ahora
+      proyeccion90Dias: await this.get90DayProjection(),
       facturasCriticas: facturasCriticas.map((f) => ({
         id: f.id,
         codigo: f.codigo,
@@ -1602,9 +2182,10 @@ export class FinanzasService {
       .slice(0, 5);
 
     return {
-      resumenCaja: { disponible },
+      resumenCaja: { disponible, porMoneda: cajas.map(c => ({ nombre: c.nombre, saldo: c.saldoDisponible, moneda: c.moneda })) },
       cartera: { porCobrar, porPagar, facturasCriticas },
       proyectos: { topRentabilidad: rentabilidadProyectos },
+      proyeccion: await this.get90DayProjection(),
       indicadores: {
         saludFinanciera: disponible > porPagar ? 'ESTABLE' : 'CRÍTICA',
         ratioLiquidez:
@@ -1613,80 +2194,167 @@ export class FinanzasService {
     };
   }
 
+  async get90DayProjection() {
+    const today = new Date();
+    const intervals = [7, 15, 30, 60, 90];
+    const projection = [];
+
+    const cajas = await this.prisma.caja.findMany();
+    const saldoInicial = cajas.reduce((acc, x) => acc + Number(x.saldoDisponible), 0);
+
+    for (const days of intervals) {
+      const limitDate = new Date();
+      limitDate.setDate(today.getDate() + days);
+
+      // Cobros esperados (Facturas pendientes)
+      const facturas = await this.prisma.factura.findMany({
+        where: {
+          estado: { in: ['PENDIENTE', 'PAGO_PARCIAL', 'VENCIDA'] as any },
+          fechaVencimiento: { lte: limitDate },
+        },
+        select: { saldoPendiente: true },
+      });
+      const cobrosEsperados = facturas.reduce((acc, f) => acc + Number(f.saldoPendiente), 0);
+
+      // Pagos programados (Gastos pendientes)
+      const gastos = await this.prisma.gasto.findMany({
+        where: {
+          estado: { in: ['PENDIENTE'] as any },
+          fechaVencimiento: { lte: limitDate },
+        },
+        select: { montoTotal: true },
+      });
+      const pagosProgramados = gastos.reduce((acc, g) => acc + Number(g.montoTotal), 0);
+
+      projection.push({
+        dias: days,
+        fecha: limitDate,
+        cobros: cobrosEsperados,
+        pagos: pagosProgramados,
+        saldoProyectado: saldoInicial + cobrosEsperados - pagosProgramados,
+      });
+    }
+
+    return projection;
+  }
+
   async getProjectProfitability(proyectoId: string) {
-    const p = await this.prisma.proyecto.findUnique({
-      where: { id: proyectoId },
-      include: {
-        facturas: {
-          where: { estado: { not: 'ANULADA' } },
-          include: { pagos: true },
+    const [p, movimientosBD] = await Promise.all([
+      this.prisma.proyecto.findUnique({
+        where: { id: proyectoId },
+        include: {
+          facturas: {
+            where: { estado: { not: 'ANULADA' } },
+            include: { pagos: true },
+          },
+          gastos: {
+            where: {
+              estado: {
+                in: ['PENDIENTE', 'PAGADO', 'SOLICITADO', 'APROBADO'] as any,
+              },
+            },
+            include: {
+              ordenCompra: {
+                include: {
+                  items: {
+                    include: { insumo: true },
+                  },
+                },
+              },
+            },
+          },
+          adelantos: true,
+          cotizacionOrigen: { select: { monto: true } },
         },
-        gastos: {
-          where: { estado: { not: 'ANULADO' } },
-          include: {
-            ordenCompra: {
-              include: {
-                items: {
-                  include: { insumo: true }
-                }
-              }
-            }
-          }
-        },
-        adelantos: true,
-        cotizacionOrigen: { select: { monto: true } },
-      },
-    });
+      }),
+      this.prisma.movimientoAlmacen.findMany({
+        where: { proyectoId: proyectoId, tipo: 'SALIDA' },
+        include: { insumo: true },
+      }),
+    ]);
+
     if (!p) throw new NotFoundException('Proyecto no encontrado');
 
     const montoCotizado = Number(
       p.cotizacionOrigen?.monto || p.costoPresupuestado || 0,
     );
 
-    // Extraer materiales de las Órdenes de Compra vinculadas a los gastos del proyecto
-    const materialesDetallados = p.gastos
-      .filter(g => g.ordenCompra)
-      .flatMap(g => g.ordenCompra!.items.map(item => ({
-        id: item.id,
-        nombre: item.insumo?.nombre || 'Insumo sin nombre',
-        cantidad: Number(item.cantidad),
-        unidad: item.insumo?.unidadMedida || 'Und',
-        precioUnitario: Number(item.precioUnitario),
-        subtotal: Number(item.subtotal),
-        fecha: g.fechaEmision,
-        proveedor: g.proveedorId, // Opcional: podrías incluir el nombre del proveedor si lo necesitas
-        ocCodigo: g.ordenCompra!.codigo
-      })));
-
-    // Ingresos: Facturado vs Cobrado
-    const totalFacturado = p.facturas.reduce(
-      (acc, f) => acc + Number(f.montoTotal),
-      0,
-    );
-    
+    // 1. INGRESOS REALES
     const totalCobradoFacturas = p.facturas.reduce(
-      (acc, f) => acc + f.pagos.reduce((sum, pago) => sum + Number(pago.monto), 0),
+      (acc, f) =>
+        acc + f.pagos.reduce((sum, pago) => sum + Number(pago.monto), 0),
       0,
     );
-
     const totalAdelantos = p.adelantos.reduce(
       (acc, a) => acc + Number(a.monto),
       0,
     );
+    const totalIngresosReales = totalCobradoFacturas + totalAdelantos;
 
-    const totalMateriales = materialesDetallados.reduce((acc, m) => acc + m.subtotal, 0);
+    // 2. COSTOS REALES
+    // 2.1 Materiales de Almacén (Kardex Real)
+    const costoMaterialesKardex = movimientosBD.reduce((sum, mov) => {
+      const precio = Number(
+        mov.costoUnitarioHistorico || mov.insumo?.precioReferencial || 0,
+      );
+      return sum + Number(mov.cantidad) * precio;
+    }, 0);
 
-    // Egresos: Gastos directos vinculados al proyecto
-    const totalGastosPagados = p.gastos
-      .filter((g) => g.estado === 'PAGADO')
-      .reduce((acc, g) => acc + Number(g.montoTotal), 0);
+    // 2.2 Materiales de Órdenes de Compra (Reporte visual de gastos)
+    const materialesOC = p.gastos
+      .filter((g) => g.ordenCompra)
+      .flatMap((g) =>
+        g.ordenCompra!.items.map((item) => ({
+          material: item.insumo?.nombre || 'Insumo sin nombre',
+          cantidad: Number(item.cantidad),
+          costoTotal: Number(item.subtotal),
+          fecha: g.fechaEmision,
+          origen: `COMPRA: ${g.ordenCompra!.codigo}`,
+        })),
+      );
 
-    const totalGastosPendientes = p.gastos
-      .filter((g) => g.estado === 'PENDIENTE')
-      .reduce((acc, g) => acc + Number(g.montoTotal), 0);
+    // 2.3 Mano de Obra
+    const costoManoObra = p.gastos
+      .filter((g) => g.tipo === 'PERSONAL' || g.tipo === 'PLANILLA')
+      .reduce((sum, g) => sum + Number(g.montoTotal), 0);
 
-    const costoTotalReal = totalGastosPagados;
-    const costoTotalProyectado = totalGastosPagados + totalGastosPendientes;
+    // 2.4 Otros Gastos
+    const costoVarios = p.gastos
+      .filter((g) => g.tipo !== 'PERSONAL' && g.tipo !== 'PLANILLA')
+      .reduce((sum, g) => sum + Number(g.montoTotal), 0);
+
+    const costoTotalReal = costoMaterialesKardex + costoManoObra + costoVarios;
+
+    // 3. INDICADORES
+    const utilidadReal = montoCotizado - costoTotalReal;
+    const margenReal =
+      montoCotizado > 0 ? (utilidadReal / montoCotizado) * 100 : 0;
+
+    // Persistencia
+    await this.prisma.proyecto.update({
+      where: { id: proyectoId },
+      data: {
+        costoTotalReal,
+        consumoMaterialesReal: costoMaterialesKardex,
+        consumoManoObraReal: costoManoObra,
+        consumoServiciosReal: costoVarios,
+        utilidadProyectada: utilidadReal,
+      },
+    });
+
+    // Historial unificado para el Frontend
+    const historialMateriales = [
+      ...movimientosBD.map((m) => ({
+        material: m.insumo?.nombre || 'Insumo Eliminado',
+        cantidad: Number(m.cantidad),
+        costoTotal:
+          Number(m.cantidad) *
+          Number(m.costoUnitarioHistorico || m.insumo?.precioReferencial || 0),
+        fecha: m.fecha,
+        origen: 'ALMACÉN (DESPACHO)',
+      })),
+      ...materialesOC,
+    ].sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
 
     return {
       proyectoId: p.id,
@@ -1694,41 +2362,32 @@ export class FinanzasService {
       codigo: p.codigo,
       montoCotizado,
       financiero: {
-        totalFacturado,
+        totalFacturado: p.facturas.reduce(
+          (acc, f) => acc + Number(f.montoTotal),
+          0,
+        ),
         totalCobradoFacturas,
         totalAdelantos,
-        totalIngresosReales: totalCobradoFacturas + totalAdelantos,
+        totalIngresosReales,
+        saldoPorCobrar: montoCotizado - totalIngresosReales,
       },
       egresos: {
-        totalGastosPagados,
-        totalGastosPendientes,
-        costoTotalReal,
-        costoTotalProyectado,
-        materiales: totalMateriales,
-        gastosDirectos: totalGastosPagados - totalMateriales,
+        costoTotal: costoTotalReal,
+        materiales: costoMaterialesKardex,
+        manoObra: costoManoObra,
+        gastosDirectos: costoVarios,
       },
-      utilidad: totalFacturado - costoTotalReal,
-      rentabilidad:
-        totalFacturado > 0
-          ? ((totalFacturado - costoTotalReal) / totalFacturado) * 100
-          : 0,
-      presupuestoExcedido: costoTotalProyectado > montoCotizado && montoCotizado > 0,
-      historialMateriales: materialesDetallados.map(m => ({
-        material: m.nombre,
-        cantidad: m.cantidad,
-        costoTotal: m.subtotal,
-        fecha: m.fecha,
-        origen: m.ocCodigo
-      })),
-      historialGastos: p.gastos.map((g) => ({
-        fecha: g.fechaEmision,
-        concepto: g.concepto,
-        monto: Number(g.montoTotal),
-        estado: g.estado,
-        codigo: g.codigo,
-        tipo: g.tipo,
-        ocCodigo: g.ordenCompra?.codigo
-      })),
+      adelantos: {
+        totalRecibido: totalAdelantos,
+        disponible: p.adelantos.reduce(
+          (acc, a) => acc + Number(a.saldoDisponible),
+          0,
+        ),
+      },
+      indicadores: {
+        utilidadProyectada: utilidadReal,
+        rentabilidadProyectada: Math.round(margenReal * 100) / 100,
+      },
       facturas: p.facturas.map((f) => ({
         id: f.id,
         codigo: f.codigo,
@@ -1737,6 +2396,18 @@ export class FinanzasService {
         estado: f.estado,
         fechaEmision: f.fechaEmision,
       })),
+      historialMateriales,
+      historialGastos: p.gastos.map((g) => ({
+        id: g.id,
+        concepto: g.concepto,
+        monto: Number(g.montoTotal),
+        fecha: g.fechaEmision,
+        estado: g.estado,
+        codigo: g.codigo,
+        tipo: g.tipo,
+        ocCodigo: g.ordenCompra?.codigo,
+      })),
+      presupuestoExcedido: costoTotalReal > montoCotizado && montoCotizado > 0,
     };
   }
 

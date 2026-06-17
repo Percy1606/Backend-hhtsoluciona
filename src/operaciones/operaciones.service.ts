@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../prisma/prisma.service'; // Import PrismaService
 import {
   PrismaClient,
@@ -230,6 +231,57 @@ export class OperacionesService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
+  @OnEvent('proyecto.costChanged')
+  async handleProjectCostChanged(payload: { proyectoId: string }) {
+    await this.checkProjectOvercost(payload.proyectoId);
+  }
+
+  async checkProjectOvercost(proyectoId: string) {
+    const costs = await this.getProjectCosts(proyectoId);
+    if (!costs) return;
+
+    const { presupuesto, costoTotalReal, porcentajeConsumo, nombre } = costs;
+
+    // ALERTA: Si el consumo supera el 60% del presupuesto
+    if (presupuesto > 0 && porcentajeConsumo >= 60) {
+      console.log(
+        `[Operaciones] ALERTA SOBRECOSTO: Proyecto ${nombre} al ${porcentajeConsumo}%`,
+      );
+
+      // 1. Buscar usuarios de finanzas y admins
+      const allUsers = await this.prisma.usuario.findMany({
+        where: {
+          OR: [{ rol: 'ADMIN' }, { rol: 'SUPERVISOR' }],
+        },
+      });
+
+      // También buscamos usuarios que tengan el módulo 'finanzas'
+      const financeUsers = await this.prisma.usuario.findMany({
+        where: {
+          NOT: [{ rol: 'ADMIN' }, { rol: 'SUPERVISOR' }],
+        },
+      });
+
+      const targetUsers = [
+        ...allUsers,
+        ...financeUsers.filter((u) => {
+          const mods = u.modulos as any[];
+          return Array.isArray(mods) && mods.includes('finanzas');
+        }),
+      ];
+
+      // 2. Notificar a cada uno
+      for (const u of targetUsers) {
+        await this.notificacionesService.create({
+          usuarioId: u.id,
+          titulo: '⚠️ Alerta de Sobrecosto',
+          mensaje: `El proyecto "${nombre}" ha superado el 60% de su presupuesto (${porcentajeConsumo}%). Costo Actual: S/ ${costoTotalReal.toLocaleString()}. Presupuesto: S/ ${presupuesto.toLocaleString()}.`,
+          tipo: 'ALERTA',
+        });
+      }
+    }
+  }
+
   async findOneProyecto(id: string): Promise<PrismaProyecto> {
     const proyecto = await this.prisma.proyecto.findUnique({
       where: { id },
@@ -270,7 +322,9 @@ export class OperacionesService {
   async getProjectCosts(id: string) {
     const proyecto = await this.prisma.proyecto.findUnique({
       where: { id },
-      select: { id: true, nombre: true, costoPresupuestado: true },
+      include: {
+        cotizacionOrigen: { select: { monto: true } },
+      },
     });
     if (!proyecto)
       throw new NotFoundException(`Proyecto con ID "${id}" no encontrado.`);
@@ -284,7 +338,6 @@ export class OperacionesService {
     });
 
     const costoMateriales = movimientos.reduce((sum, mov) => {
-      // Priorizar el costo que quedó grabado al momento de la salida (Error 3)
       const precio = Number(
         mov.costoUnitarioHistorico || mov.insumo?.precioReferencial || 0,
       );
@@ -294,30 +347,56 @@ export class OperacionesService {
 
     // 2. Costos de Finanzas (Gastos directos asignados a la obra)
     const gastos = await this.prisma.gasto.findMany({
-      where: { proyectoId: id, estado: { not: 'ANULADO' } },
+      where: {
+        proyectoId: id,
+        estado: { in: ['PENDIENTE', 'PAGADO', 'SOLICITADO', 'APROBADO'] as any },
+      },
     });
 
-    const costoServicios = gastos.reduce(
-      (sum, g) => sum + Number(g.montoTotal || 0),
-      0,
-    );
+    const costoManoObra = gastos
+      .filter((g) => g.tipo === 'PERSONAL' || g.tipo === 'PLANILLA')
+      .reduce((sum, g) => sum + Number(g.montoTotal || 0), 0);
 
-    const costoTotalReal = costoMateriales + costoServicios;
+    const costoServiciosYVarios = gastos
+      .filter((g) => g.tipo !== 'PERSONAL' && g.tipo !== 'PLANILLA')
+      .reduce((sum, g) => sum + Number(g.montoTotal || 0), 0);
+
+    const costoTotalReal =
+      costoMateriales + costoManoObra + costoServiciosYVarios;
     const presupuesto = Number(proyecto.costoPresupuestado || 0);
-    const porcentajeConsumo =
-      presupuesto > 0 ? (costoTotalReal / presupuesto) * 100 : 0;
-    const margenRestante = presupuesto - costoTotalReal;
+    const venta = Number(proyecto.cotizacionOrigen?.monto || 0);
+
+    const utilidadReal = venta - costoTotalReal;
+    const margenReal = venta > 0 ? (utilidadReal / venta) * 100 : 0;
+
+    // ACTUALIZAR REGISTRO EN BD PARA PERSISTENCIA
+    await this.prisma.proyecto.update({
+      where: { id },
+      data: {
+        costoTotalReal: costoTotalReal,
+        consumoMaterialesReal: costoMateriales,
+        consumoManoObraReal: costoManoObra,
+        consumoServiciosReal: costoServiciosYVarios,
+        utilidadProyectada: utilidadReal,
+      },
+    });
 
     return {
       proyectoId: id,
       nombre: proyecto.nombre,
+      venta,
       presupuesto,
       costoTotalReal,
-      porcentajeConsumo: Math.round(porcentajeConsumo * 100) / 100,
-      margenRestante,
+      utilidadReal,
+      margenReal: Math.round(margenReal * 100) / 100,
+      porcentajeConsumo:
+        presupuesto > 0
+          ? Math.round((costoTotalReal / presupuesto) * 10000) / 100
+          : 0,
       desglose: {
-        materialesLogistica: costoMateriales,
-        gastosFinanzas: costoServicios,
+        materiales: costoMateriales,
+        manoObra: costoManoObra,
+        serviciosYVarios: costoServiciosYVarios,
       },
       historialMateriales: movimientos.map((m) => {
         const p = Number(
@@ -409,6 +488,11 @@ export class OperacionesService {
           semaforo: initialSemaforo,
           avance: 0,
           avanceCalculado: 0,
+
+          ventaContratada: Number(cotizacion.monto),
+          costoPresupuestado: Number(dto.costoPresupuestado || 0),
+          margenMeta: Number(cotizacion.monto) - Number(dto.costoPresupuestado || 0),
+
           creadoPor: user?.nombre || 'Admin',
           fechaCreacion: new Date(),
           fechaInicio: new Date(dto.fechaInicio),
@@ -440,6 +524,32 @@ export class OperacionesService {
           titulo: 'Nuevo Proyecto Asignado',
           mensaje: `Se te ha asignado como Responsable Principal del proyecto: ${proyecto.nombre}.`,
           tipo: 'SISTEMA',
+        });
+      }
+
+      // NUEVA LÓGICA: Crear Adelantos automáticos si la cotización tiene hitos COBRADOS
+      const hitosCobrados = await this.prisma.hitoPago.findMany({
+        where: {
+          cotizacionId: cotizacionId,
+          estado: 'COBRADO'
+        }
+      });
+
+      for (const hito of hitosCobrados) {
+        await this.prisma.adelantoProyecto.create({
+          data: {
+            id: uuidv4(),
+            proyectoId: proyecto.id,
+            monto: Number(hito.monto),
+            fechaRecibido: new Date(),
+            metodo: 'TRANSFERENCIA',
+            referencia: `Hito: ${hito.descripcion}`,
+            saldoDisponible: Number(hito.monto),
+            montoAplicado: 0,
+            observaciones: `Cargado automáticamente desde Cotización ${cotizacion.codigo}`,
+            registradoPorId: user?.id || 'SISTEMA',
+            updatedAt: new Date()
+          }
         });
       }
 

@@ -47,6 +47,22 @@ export class CrmService {
     if (filters.clasificacion) where.clasificacion = filters.clasificacion;
     if (filters.estado) where.estado = filters.estado;
     if (filters.etapaComercial) where.etapaComercial = filters.etapaComercial;
+    
+    // FILTRO POR FECHA DE CREACIÓN (PROSPECTANDO POR DÍA)
+    if (filters.startDate || filters.endDate) {
+      where.fechaCreacion = {};
+      if (filters.startDate) {
+        const start = new Date(filters.startDate);
+        start.setHours(0, 0, 0, 0);
+        where.fechaCreacion.gte = start;
+      }
+      if (filters.endDate) {
+        const end = new Date(filters.endDate);
+        end.setHours(23, 59, 59, 999);
+        where.fechaCreacion.lte = end;
+      }
+    }
+
     if (filters.esClienteReal !== undefined)
       where.esClienteReal =
         filters.esClienteReal === 'true' || filters.esClienteReal === true;
@@ -213,6 +229,27 @@ export class CrmService {
 
   async updateCliente(id: string, dto: UpdateClienteDto, user?: any) {
     try {
+      // 0. Verificar si el cliente ya está en estado GANADO
+      const currentCliente = await this.prisma.cliente.findUnique({
+        where: { id },
+      });
+      if (!currentCliente) throw new NotFoundException('Cliente no encontrado');
+
+      if (
+        currentCliente.etapaComercial &&
+        currentCliente.etapaComercial.toUpperCase() === 'GANADO'
+      ) {
+        // Si ya está ganado, no permitimos cambiar la etapa ni el tipo
+        if (
+          dto.etapaComercial &&
+          dto.etapaComercial.toUpperCase() !== 'GANADO'
+        ) {
+          throw new BadRequestException(
+            'No se puede cambiar el estado de un cliente que ya ha sido marcado como GANADO.',
+          );
+        }
+      }
+
       const {
         ultimoContacto,
         proximoSeguimiento,
@@ -533,7 +570,7 @@ export class CrmService {
   }
 
   async createDocumento(dto: any) {
-    const { clientId, ...data } = dto;
+    const { clientId, cotizacionId, ...data } = dto;
 
     // Normalización para Prisma Enums
     const tipo =
@@ -550,12 +587,16 @@ export class CrmService {
         ? data.estado
         : 'Aprobado';
 
+    const connectData: any = {};
+    if (clientId) connectData.cliente = { connect: { id: clientId } };
+    if (cotizacionId) connectData.cotizacion = { connect: { id: cotizacionId } };
+
     return this.prisma.documento.create({
       data: {
         ...data,
         tipo: tipo,
         estado: estado,
-        cliente: { connect: { id: clientId } },
+        ...connectData,
       },
     });
   }

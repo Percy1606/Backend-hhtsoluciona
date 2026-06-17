@@ -51,6 +51,10 @@ export class CreateFacturaDto {
   @IsNotEmpty()
   fechaVencimiento: string;
 
+  @IsDateString()
+  @IsOptional()
+  fechaEstimadaCobro?: string;
+
   @IsEnum(EstadoFactura)
   @IsOptional()
   estado?: EstadoFactura;

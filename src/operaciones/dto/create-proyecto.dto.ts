@@ -47,6 +47,11 @@ export class CreateProyectoDto {
   @IsEnum(Area)
   area: Area;
 
+  @IsNumber()
+  @IsOptional()
+  @Type(() => Number)
+  costoPresupuestado?: number;
+
   @IsString()
   cotizacionId: string;
 }

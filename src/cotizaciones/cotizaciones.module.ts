@@ -4,9 +4,10 @@ import { CotizacionesController } from './cotizaciones.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
 import { NotificacionesModule } from '../notificaciones/notificaciones.module';
+import { FinanzasModule } from '../finanzas/finanzas.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, NotificacionesModule],
+  imports: [PrismaModule, AuthModule, NotificacionesModule, FinanzasModule],
   controllers: [CotizacionesController],
   providers: [CotizacionesService],
   exports: [CotizacionesService],
