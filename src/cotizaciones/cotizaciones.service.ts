@@ -510,8 +510,28 @@ export class CotizacionesService {
   }
 
   private async generateCode(): Promise<string> {
-    const count = await this.prisma.cotizacion.count();
     const year = new Date().getFullYear();
-    return `COT-${year}-${(count + 1).toString().padStart(3, '0')}`;
+    const prefix = `COT-${year}-`;
+    
+    const lastQuote = await this.prisma.cotizacion.findFirst({
+      where: {
+        codigo: {
+          startsWith: prefix,
+        },
+      },
+      orderBy: {
+        codigo: 'desc',
+      },
+    });
+
+    let nextNumber = 1;
+    if (lastQuote) {
+      const lastNumber = parseInt(lastQuote.codigo.split('-')[2]);
+      if (!isNaN(lastNumber)) {
+        nextNumber = lastNumber + 1;
+      }
+    }
+
+    return `${prefix}${nextNumber.toString().padStart(3, '0')}`;
   }
 }
