@@ -91,6 +91,9 @@ export class CrmService {
             },
             proyectos: true,
             documentos: true,
+            _count: {
+              select: { cotizaciones: true }
+            }
           },
           orderBy: { fechaCreacion: 'desc' },
           skip,
@@ -123,6 +126,9 @@ export class CrmService {
         },
         proyectos: true,
         documentos: true,
+        _count: {
+          select: { cotizaciones: true }
+        }
       },
     });
     if (!cliente || cliente.deletedAt) {

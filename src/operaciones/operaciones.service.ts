@@ -168,8 +168,9 @@ export class OperacionesService {
       where.responsablePrincipalId = filters.responsablePrincipalId;
     }
 
-    // 4. FILTRO DE SEGURIDAD POR ROL (Solo para usuarios no administradores/supervisores)
-    // Se asegura de que vean tanto donde son principales como adicionales
+    // 4. FILTRO DE SEGURIDAD POR ROL (REMOVIDO POR SOLICITUD)
+    // Ahora todos los usuarios pueden ver todos los proyectos
+    /*
     if (user && user.rol !== 'ADMIN' && user.rol !== 'SUPERVISOR') {
       const responsableId = user.responsable?.id;
       if (responsableId) {
@@ -180,10 +181,10 @@ export class OperacionesService {
           ],
         });
       } else {
-        // Si el usuario no tiene perfil de responsable vinculado, no debe ver proyectos
         where.responsablePrincipalId = 'NONE';
       }
     }
+    */
 
     // Combinar todas las condiciones AND si existen
     if (andConditions.length > 0) {
@@ -1081,7 +1082,8 @@ export class OperacionesService {
       });
     }
 
-    // 3. FILTRO DE SEGURIDAD POR ROL
+    // 3. FILTRO DE SEGURIDAD POR ROL (REMOVIDO POR SOLICITUD)
+    /*
     if (user && user.rol !== 'ADMIN' && user.rol !== 'SUPERVISOR') {
       const responsableId = user.responsable?.id;
       if (responsableId) {
@@ -1096,6 +1098,7 @@ export class OperacionesService {
         where.responsablePrincipalId = 'NONE';
       }
     }
+    */
 
     // Combinar condiciones AND si existen
     if (andConditions.length > 0) {
@@ -1359,7 +1362,9 @@ export class OperacionesService {
       delete where.endDate;
     }
 
-    // FILTRO POR ROL: Si no es ADMIN ni SUPERVISOR, forzamos que solo vea lo suyo
+    // FILTRO POR ROL (REMOVIDO POR SOLICITUD)
+    // Ahora todos pueden ver todas las fichas técnicas
+    /*
     if (user && user.rol !== 'ADMIN' && user.rol !== 'SUPERVISOR') {
       const responsableId = user.responsable?.id;
       if (responsableId) {
@@ -1374,6 +1379,12 @@ export class OperacionesService {
       filters.tecnicoId
     ) {
       // Si es ADMIN/SUPERVISOR y filtró por un técnico específico, lo respetamos
+      where.tecnicoId = filters.tecnicoId;
+    }
+    */
+    
+    // Si filtró explícitamente por un técnico, lo respetamos (sin importar rol)
+    if (filters.tecnicoId) {
       where.tecnicoId = filters.tecnicoId;
     }
 

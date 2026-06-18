@@ -1,3 +1,5 @@
+// HH-BACKEND/prisma/schema.prisma
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -6,931 +8,45 @@ datasource db {
   provider = "mysql"
 }
 
-model actividad {
-  id                       String                @id
-  proyectoId               String
-  descripcion              String                @db.Text
-  tipo                     actividad_tipo
-  prioridad                actividad_prioridad
-  estado                   actividad_estado
-  fechaCreacion            DateTime              @default(now())
-  fechaInicio              DateTime?
-  fechaFin                 DateTime?
-  fechaVencimiento         DateTime?
-  responsablePrincipalId   String
-  responsablesApoyo        String                @db.LongText
-  checklistBloqueado       Boolean?              @default(false)
-  motivoBloqueoChecklist   String?
-  desbloqueadoPor          String?
-  fechaDesbloqueoChecklist DateTime?
-  observaciones            String?               @db.Text
-  seguimientoOperativo     String?               @db.Text
-  progreso                 Float                 @default(0)
-  ponderacion              Float?
-  orden                    Int?
-  padreId                  String?
-  esSuboperacion           Boolean?              @default(false)
-  proyecto                 proyecto              @relation(fields: [proyectoId], references: [id], map: "Actividad_proyectoId_fkey")
-  responsable              responsable           @relation(fields: [responsablePrincipalId], references: [id], map: "Actividad_responsablePrincipalId_fkey")
-  comentario               comentario[]
-  evidencia                evidencia[]
-  historialcambio          historialcambio[]
-  subtarea                 subtarea[]
-  validacionrequerida      validacionrequerida[]
-
-  @@index([proyectoId], map: "Actividad_proyectoId_fkey")
-  @@index([responsablePrincipalId], map: "Actividad_responsablePrincipalId_fkey")
-}
-
-model actividad_comercial {
-  id                 String                            @id
-  clienteId          String
-  usuarioId          String
-  tipoActividad      actividad_comercial_tipoActividad
-  descripcion        String                            @db.Text
-  fechaActividad     DateTime                          @default(now())
-  proximoSeguimiento DateTime?
-  estado             actividad_comercial_estado        @default(PENDIENTE)
-  createdAt          DateTime                          @default(now())
-  updatedAt          DateTime
-  cliente            cliente                           @relation(fields: [clienteId], references: [id], onDelete: Cascade, map: "ACTIVIDAD_COMERCIAL_clienteId_fkey")
-  notificacion       notificacion[]
-
-  @@index([clienteId], map: "ACTIVIDAD_COMERCIAL_clienteId_fkey")
-}
-
-model adelanto_proyecto {
-  id                    String                   @id
-  proyectoId            String
-  monto                 Decimal                  @db.Decimal(18, 2)
-  fechaRecibido         DateTime                 @default(now())
-  metodo                adelanto_proyecto_metodo @default(TRANSFERENCIA)
-  referencia            String?
-  comprobanteUrl        String?
-  montoAplicado         Decimal                  @default(0.00) @db.Decimal(18, 2)
-  saldoDisponible       Decimal                  @default(0.00) @db.Decimal(18, 2)
-  observaciones         String?                  @db.Text
-  registradoPorId       String
-  createdAt             DateTime                 @default(now())
-  updatedAt             DateTime
-  proyecto              proyecto                 @relation(fields: [proyectoId], references: [id], onDelete: Cascade, map: "ADELANTO_PROYECTO_proyectoId_fkey")
-  distribucion_adelanto distribucion_adelanto[]
-
-  @@index([proyectoId], map: "ADELANTO_PROYECTO_proyectoId_fkey")
-}
-
-model aprobacion_gasto {
-  id         String                  @id
-  gastoId    String
-  usuarioId  String
-  nivel      Int
-  rol        String
-  estado     aprobacion_gasto_estado @default(APROBADO)
-  comentario String?                 @db.Text
-  fecha      DateTime                @default(now())
-  gasto      gasto                   @relation(fields: [gastoId], references: [id], onDelete: Cascade, map: "APROBACION_GASTO_gastoId_fkey")
-  usuario    usuario                 @relation(fields: [usuarioId], references: [id], map: "APROBACION_GASTO_usuarioId_fkey")
-
-  @@index([gastoId], map: "APROBACION_GASTO_gastoId_idx")
-  @@index([usuarioId], map: "APROBACION_GASTO_usuarioId_fkey")
-}
-
-model audit_log {
-  id            String   @id
-  usuarioId     String
-  modulo        String
-  accion        String
-  detalles      String?  @db.LongText
-  ip            String?
-  fechaCreacion DateTime @default(now())
-  usuario       usuario  @relation(fields: [usuarioId], references: [id], map: "AUDIT_LOG_usuarioId_fkey")
-
-  @@index([usuarioId], map: "AUDIT_LOG_usuarioId_fkey")
-}
-
-model caja {
-  id                  String             @id
-  nombre              String             @unique(map: "CAJA_nombre_key")
-  tipo                String             @default("BANCO")
-  moneda              String             @default("PEN")
-  saldoReal           Decimal            @default(0.00) @db.Decimal(18, 2)
-  saldoComprometido   Decimal            @default(0.00) @db.Decimal(18, 2)
-  saldoDisponible     Decimal            @default(0.00) @db.Decimal(18, 2)
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime
-  esProtegida         Boolean            @default(false)
-  esPrincipal         Boolean            @default(false)
-  porcentajeProvision Decimal            @default(0.00) @db.Decimal(18, 2)
-  subtipo             caja_subtipo       @default(OPERATIVA)
-  gasto               gasto[]
-  pago                pago[]
-  transaccion_caja    transaccion_caja[]
-}
-
-model cliente {
-  id                   String                @id
-  codigo               String                @unique(map: "CLIENTE_codigo_key")
-  empresa              String
-  ruc                  String?               @unique(map: "CLIENTE_ruc_key")
-  direccion            String
-  tarifa               String
-  contacto             String
-  telefono             String?
-  cargo                String?
-  correo               String?
-  linkedin             String?
-  cartera              String?
-  asignadoA            String
-  responsableId        String?
-  diaTrabajo           String?
-  estado               String
-  prioridad            String
-  accion               String
-  ultimoContacto       DateTime?
-  proximoSeguimiento   DateTime?
-  observaciones        String?               @db.Text
-  zona                 String
-  semaforo             String
-  temperatura          String
-  montoEstimado        Decimal               @default(0.00) @db.Decimal(18, 2)
-  probabilidad         Float                 @default(0)
-  ventaProyectada      Decimal               @default(0.00) @db.Decimal(18, 2)
-  tipoCliente          cliente_tipoCliente   @default(PROSPECTO)
-  clasificacion        cliente_clasificacion @default(RENTABLE)
-  esClienteReal        Boolean               @default(false)
-  etapaComercial       String
-  hallazgosTecnicos    String?               @db.LongText
-  solucionesPropuestas String?               @db.LongText
-  propuestaTecnicaUrl  String?
-  deletedAt            DateTime?
-  fechaCreacion        DateTime              @default(now())
-  fechaActualizacion   DateTime?
-  actividad_comercial  actividad_comercial[]
-  responsable          responsable?          @relation(fields: [responsableId], references: [id], map: "CLIENTE_responsableId_fkey")
-  cotizacion           cotizacion[]
-  documento            documento[]
-  factura              factura[]
-  ficha_tecnica        ficha_tecnica[]
-  interaccion          interaccion[]
-  proyecto             proyecto[]
-
-  @@index([empresa], map: "CLIENTE_empresa_idx")
-  @@index([responsableId], map: "CLIENTE_responsableId_fkey")
-  @@index([ruc], map: "CLIENTE_ruc_idx")
-  @@index([zona], map: "CLIENTE_zona_idx")
-}
-
-model comentario {
-  id          String                 @id
-  proyectoId  String?
-  actividadId String?
-  usuario     String
-  usuarioArea comentario_usuarioArea
-  contenido   String                 @db.Text
-  fecha       DateTime               @default(now())
-  esInterno   Boolean                @default(false)
-  actividad   actividad?             @relation(fields: [actividadId], references: [id], onDelete: Cascade, map: "Comentario_actividadId_fkey")
-  proyecto    proyecto?              @relation(fields: [proyectoId], references: [id], onDelete: Cascade, map: "Comentario_proyectoId_fkey")
-
-  @@index([actividadId], map: "Comentario_actividadId_fkey")
-  @@index([proyectoId], map: "Comentario_proyectoId_fkey")
-}
-
-model configuracion_aprobacion {
-  id               String                             @id
-  tipoGasto        configuracion_aprobacion_tipoGasto
-  montoMinimo      Decimal                            @db.Decimal(18, 2)
-  montoMaximo      Decimal                            @db.Decimal(18, 2)
-  prioridad        configuracion_aprobacion_prioridad @default(MEDIA)
-  rolesAprobadores String                             @db.LongText
-  activo           Boolean                            @default(true)
-  createdAt        DateTime                           @default(now())
-  updatedAt        DateTime
-}
-
-model cotizacion {
-  id                 String        @id
-  codigo             String        @unique(map: "COTIZACION_codigo_key")
-  clientId           String
-  referencia         String?       @db.Text
-  objetivo           String?       @db.Text
-  alcance            String?       @db.LongText
-  consideraciones    String?       @db.Text
-  entregables        String?       @db.Text
-  monto              Decimal       @default(0.00) @db.Decimal(18, 2)
-  estado             String
-  fecha              DateTime      @default(now())
-  plazo              String?       @default("7 días")
-  validez            String?       @default("15 días")
-  formaPago          String?       @db.Text
-  observaciones      String?       @db.Text
-  version            Int           @default(1)
-  cotizacionPadreId  String?
-  proyectoGeneradoId String?       @unique(map: "COTIZACION_proyectoGeneradoId_key")
-  fechaCreacion      DateTime      @default(now())
-  fechaActualizacion DateTime?
-  moneda             String        @default("PEN")
-  cliente            cliente       @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "COTIZACION_clientId_fkey")
-  cotizacion         cotizacion?   @relation("cotizacionTocotizacion", fields: [cotizacionPadreId], references: [id], map: "COTIZACION_cotizacionPadreId_fkey")
-  other_cotizacion   cotizacion[]  @relation("cotizacionTocotizacion")
-  proyecto           proyecto?     @relation(fields: [proyectoGeneradoId], references: [id], map: "COTIZACION_proyectoGeneradoId_fkey")
-  documento          documento[]
-  factura            factura[]
-  hito_pago          hito_pago[]
-  interaccion        interaccion[]
-
-  @@index([clientId], map: "COTIZACION_clientId_fkey")
-  @@index([cotizacionPadreId], map: "COTIZACION_cotizacionPadreId_fkey")
-}
-
-model detalle_orden_compra {
-  id             String       @id
-  ordenId        String
-  insumoId       String
-  cantidad       Decimal      @db.Decimal(18, 4)
-  precioUnitario Decimal      @db.Decimal(18, 2)
-  subtotal       Decimal      @db.Decimal(18, 2)
-  insumo         insumo       @relation(fields: [insumoId], references: [id], map: "DETALLE_ORDEN_COMPRA_insumoId_fkey")
-  orden_compra   orden_compra @relation(fields: [ordenId], references: [id], onDelete: Cascade, map: "DETALLE_ORDEN_COMPRA_ordenId_fkey")
-
-  @@index([insumoId], map: "DETALLE_ORDEN_COMPRA_insumoId_fkey")
-  @@index([ordenId], map: "DETALLE_ORDEN_COMPRA_ordenId_fkey")
-}
-
-model distribucion_adelanto {
-  id                String                          @id
-  adelantoId        String
-  categoria         distribucion_adelanto_categoria
-  montoAsignado     Decimal                         @db.Decimal(18, 2)
-  montoGastado      Decimal                         @default(0.00) @db.Decimal(18, 2)
-  saldoDisponible   Decimal                         @db.Decimal(18, 2)
-  adelanto_proyecto adelanto_proyecto               @relation(fields: [adelantoId], references: [id], onDelete: Cascade, map: "DISTRIBUCION_ADELANTO_adelantoId_fkey")
-
-  @@index([adelantoId], map: "DISTRIBUCION_ADELANTO_adelantoId_fkey")
-}
-
-model documento {
-  id                  String             @id
-  proyectoId          String?
-  expedienteTecnicoId String?
-  clientId            String?
-  cotizacionId        String?
-  nombre              String
-  tipo                documento_tipo
-  subtype             String?
-  numero              String?
-  url                 String
-  version             String?
-  estado              documento_estado
-  subidoPor           String
-  tamano              String?
-  fechaSubida         DateTime           @default(now())
-  fechaVencimiento    DateTime?
-  observaciones       String?            @db.Text
-  esEntregable        Boolean?           @default(false)
-  cliente             cliente?           @relation(fields: [clientId], references: [id], map: "Documento_clientId_fkey")
-  cotizacion          cotizacion?        @relation(fields: [cotizacionId], references: [id], map: "Documento_cotizacionId_fkey")
-  expedientetecnico   expedientetecnico? @relation(fields: [expedienteTecnicoId], references: [id], map: "Documento_expedienteTecnicoId_fkey")
-  proyecto            proyecto?          @relation(fields: [proyectoId], references: [id], map: "Documento_proyectoId_fkey")
-
-  @@index([clientId], map: "Documento_clientId_fkey")
-  @@index([cotizacionId], map: "Documento_cotizacionId_fkey")
-  @@index([expedienteTecnicoId], map: "Documento_expedienteTecnicoId_fkey")
-  @@index([proyectoId], map: "Documento_proyectoId_fkey")
-}
-
-model entregable {
-  id              String       @id
-  suboperacionId  String
-  nombre          String
-  descripcion     String?      @db.Text
-  tipo            String
-  url             String?
-  estado          String
-  fechaEntrega    DateTime?
-  fechaAprobacion DateTime?
-  aprobadoPor     String?
-  suboperacion    suboperacion @relation(fields: [suboperacionId], references: [id], map: "Entregable_suboperacionId_fkey")
-
-  @@index([suboperacionId], map: "Entregable_suboperacionId_fkey")
-}
-
-model evaluaciontecnica {
-  id                   String   @id
-  proyectoId           String   @unique(map: "EvaluacionTecnica_proyectoId_key")
-  fechaEvaluacion      DateTime
-  evaluadoPor          String
-  hallazgos            String   @db.LongText
-  solucionesPropuestas String   @db.LongText
-  recomendaciones      String   @db.Text
-  estado               String
-  documentoUrl         String?
-  proyecto             proyecto @relation(fields: [proyectoId], references: [id], map: "EvaluacionTecnica_proyectoId_fkey")
-}
-
-model evidencia {
-  id              String         @id
-  proyectoId      String?
-  actividadId     String?
-  reporteDiarioId String?
-  nombre          String
-  tipo            String
-  url             String
-  tamano          String
-  subidoPor       String
-  fecha           DateTime       @default(now())
-  descripcion     String?        @db.Text
-  actividad       actividad?     @relation(fields: [actividadId], references: [id], onDelete: Cascade, map: "Evidencia_actividadId_fkey")
-  proyecto        proyecto?      @relation(fields: [proyectoId], references: [id], onDelete: Cascade, map: "Evidencia_proyectoId_fkey")
-  reportediario   reportediario? @relation(fields: [reporteDiarioId], references: [id], onDelete: Cascade, map: "Evidencia_reporteDiarioId_fkey")
-
-  @@index([actividadId], map: "Evidencia_actividadId_fkey")
-  @@index([proyectoId], map: "Evidencia_proyectoId_fkey")
-  @@index([reporteDiarioId], map: "Evidencia_reporteDiarioId_fkey")
-}
-
-model expedientetecnico {
-  id                 String      @id
-  proyectoId         String      @unique(map: "ExpedienteTecnico_proyectoId_key")
-  numeroExpediente   String
-  titulo             String
-  descripcion        String?     @db.Text
-  estado             String
-  fechaCreacion      DateTime    @default(now())
-  fechaActualizacion DateTime
-  documento          documento[]
-  proyecto           proyecto    @relation(fields: [proyectoId], references: [id], map: "ExpedienteTecnico_proyectoId_fkey")
-}
-
-model factura {
-  id                 String                @id
-  codigo             String                @unique(map: "FACTURA_codigo_key")
-  clienteId          String
-  proyectoId         String?
-  cotizacionId       String?
-  clasificacion      factura_clasificacion @default(VENTA_SERVICIO)
-  montoSubtotal      Decimal               @default(0.00) @db.Decimal(18, 2)
-  montoIgv           Decimal               @default(0.00) @db.Decimal(18, 2)
-  montoTotal         Decimal               @default(0.00) @db.Decimal(18, 2)
-  saldoPendiente     Decimal               @default(0.00) @db.Decimal(18, 2)
-  fechaEmision       DateTime              @default(now())
-  fechaVencimiento   DateTime
-  estado             factura_estado        @default(PENDIENTE)
-  observaciones      String?               @db.Text
-  archivoUrl         String?
-  esRecurrente       Boolean               @default(false)
-  frecuencia         String?
-  proximaFacturacion DateTime?
-  notificadoCobranza Boolean               @default(false)
-  createdAt          DateTime              @default(now())
-  updatedAt          DateTime
-  fechaEstimadaCobro DateTime?
-  hitoPagoId         String?
-  cliente            cliente               @relation(fields: [clienteId], references: [id], map: "FACTURA_clienteId_fkey")
-  cotizacion         cotizacion?           @relation(fields: [cotizacionId], references: [id], map: "FACTURA_cotizacionId_fkey")
-  hito_pago          hito_pago?            @relation(fields: [hitoPagoId], references: [id], map: "FACTURA_hitoPagoId_fkey")
-  proyecto           proyecto?             @relation(fields: [proyectoId], references: [id], map: "FACTURA_proyectoId_fkey")
-  pago               pago[]
-
-  @@index([clienteId], map: "FACTURA_clienteId_idx")
-  @@index([cotizacionId], map: "FACTURA_cotizacionId_fkey")
-  @@index([estado], map: "FACTURA_estado_idx")
-  @@index([fechaEmision], map: "FACTURA_fechaEmision_idx")
-  @@index([fechaEstimadaCobro], map: "FACTURA_fechaEstimadaCobro_idx")
-  @@index([hitoPagoId], map: "FACTURA_hitoPagoId_fkey")
-  @@index([proyectoId], map: "FACTURA_proyectoId_idx")
-}
-
-model ficha_tecnica {
-  id                    String                  @id
-  clienteId             String
-  tecnicoId             String
-  fechaVisita           DateTime
-  observaciones         String?                 @db.Text
-  hallazgos             String?                 @db.Text
-  recomendaciones       String?                 @db.Text
-  estado                String
-  firmaTecnico          String?                 @db.Text
-  datosTecnicos         String?                 @db.LongText
-  createdAt             DateTime                @default(now())
-  updatedAt             DateTime
-  cliente               cliente                 @relation(fields: [clienteId], references: [id], onDelete: Cascade, map: "FICHA_TECNICA_clienteId_fkey")
-  responsable           responsable             @relation(fields: [tecnicoId], references: [id], map: "FICHA_TECNICA_tecnicoId_fkey")
-  ficha_tecnica_adjunto ficha_tecnica_adjunto[]
-
-  @@index([clienteId], map: "FICHA_TECNICA_clienteId_fkey")
-  @@index([tecnicoId], map: "FICHA_TECNICA_tecnicoId_fkey")
-}
-
-model ficha_tecnica_adjunto {
-  id             String        @id
-  fichaTecnicaId String
-  nombre         String
-  url            String
-  tipo           String
-  createdAt      DateTime      @default(now())
-  ficha_tecnica  ficha_tecnica @relation(fields: [fichaTecnicaId], references: [id], onDelete: Cascade, map: "FICHA_TECNICA_ADJUNTO_fichaTecnicaId_fkey")
-
-  @@index([fichaTecnicaId], map: "FICHA_TECNICA_ADJUNTO_fichaTecnicaId_fkey")
-}
-
-model gasto {
-  id                    String                       @id
-  codigo                String?
-  proveedorId           String?
-  proyectoId            String?
-  ordenCompraId         String?                      @unique(map: "GASTO_ordenCompraId_key")
-  cajaId                String?
-  tipo                  gasto_tipo                   @default(OPERATIVO)
-  clasificacion         gasto_clasificacion          @default(VENTA_SERVICIO)
-  categoriaDistribucion gasto_categoriaDistribucion?
-  concepto              String                       @db.Text
-  montoTotal            Decimal                      @db.Decimal(18, 2)
-  saldoPendiente        Decimal                      @db.Decimal(18, 2)
-  fechaEmision          DateTime                     @default(now())
-  fechaVencimiento      DateTime?
-  fechaPago             DateTime?
-  estado                gasto_estado                 @default(PENDIENTE)
-  comprobanteUrl        String?
-  registradoPorId       String
-  createdAt             DateTime                     @default(now())
-  updatedAt             DateTime
-  aprobadorFinanzasId   String?
-  aprobadorGerenciaId   String?
-  area                  gasto_area?
-  estadoRendicion       gasto_estadoRendicion?       @default(PENDIENTE)
-  justificacion         String?                      @db.Text
-  montoRendido          Decimal?                     @default(0.00) @db.Decimal(18, 2)
-  nivelAprobacion       gasto_nivelAprobacion?
-  solicitanteId         String?
-  fechaProgramadaPago   DateTime?
-  nivelActual           Int                          @default(0)
-  prioridad             gasto_prioridad              @default(MEDIA)
-  aprobacion_gasto      aprobacion_gasto[]
-  caja                  caja?                        @relation(fields: [cajaId], references: [id], map: "GASTO_cajaId_fkey")
-  orden_compra          orden_compra?                @relation(fields: [ordenCompraId], references: [id], map: "GASTO_ordenCompraId_fkey")
-  proveedor             proveedor?                   @relation(fields: [proveedorId], references: [id], map: "GASTO_proveedorId_fkey")
-  proyecto              proyecto?                    @relation(fields: [proyectoId], references: [id], map: "GASTO_proyectoId_fkey")
-  pago                  pago[]
-  rendicion             rendicion[]
-
-  @@index([cajaId], map: "GASTO_cajaId_fkey")
-  @@index([fechaProgramadaPago], map: "GASTO_fechaProgramadaPago_idx")
-  @@index([proveedorId], map: "GASTO_proveedorId_fkey")
-  @@index([proyectoId], map: "GASTO_proyectoId_fkey")
-}
-
-model historialcambio {
-  id            String               @id
-  proyectoId    String?
-  actividadId   String?
-  campo         String
-  valorAnterior String               @db.Text
-  valorNuevo    String               @db.Text
-  usuario       String
-  area          historialcambio_area
-  fecha         DateTime             @default(now())
-  motivo        String?              @db.Text
-  actividad     actividad?           @relation(fields: [actividadId], references: [id], onDelete: Cascade, map: "HistorialCambio_actividadId_fkey")
-  proyecto      proyecto?            @relation(fields: [proyectoId], references: [id], onDelete: Cascade, map: "HistorialCambio_proyectoId_fkey")
-
-  @@index([actividadId], map: "HistorialCambio_actividadId_fkey")
-  @@index([proyectoId], map: "HistorialCambio_proyectoId_fkey")
-}
-
-model hito_pago {
-  id            String           @id
-  cotizacionId  String
-  descripcion   String
-  porcentaje    Decimal          @db.Decimal(5, 2)
-  monto         Decimal          @db.Decimal(18, 2)
-  fechaEstimada DateTime?
-  estado        hito_pago_estado @default(PENDIENTE)
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime
-  factura       factura[]
-  cotizacion    cotizacion       @relation(fields: [cotizacionId], references: [id], onDelete: Cascade, map: "HITO_PAGO_cotizacionId_fkey")
-
-  @@index([cotizacionId], map: "HITO_PAGO_cotizacionId_fkey")
-}
-
-model indicadoravance {
-  id                     String               @id
-  proyectoId             String
-  area                   indicadoravance_area
-  porcentaje             Float
-  actividadesTotal       Int
-  actividadesCompletadas Int
-  ultimaActualizacion    DateTime
-  proyecto               proyecto             @relation(fields: [proyectoId], references: [id], map: "IndicadorAvance_proyectoId_fkey")
-
-  @@index([proyectoId], map: "IndicadorAvance_proyectoId_fkey")
-}
-
-model ingenieriadiseno {
-  id                   String        @id
-  proyectoId           String        @unique(map: "IngenieriaDiseno_proyectoId_key")
-  fechaInicio          DateTime
-  fechaFinEstimada     DateTime?
-  ingenieroResponsable String
-  especificaciones     String        @db.LongText
-  estado               String
-  proyecto             proyecto      @relation(fields: [proyectoId], references: [id], map: "IngenieriaDiseno_proyectoId_fkey")
-  planodiseno          planodiseno[]
-}
-
-model insumo {
-  id                   String                 @id
-  nombre               String
-  descripcion          String?                @db.Text
-  unidadMedida         String
-  stockActual          Decimal                @default(0.0000) @db.Decimal(18, 4)
-  stockMinimo          Decimal                @default(0.0000) @db.Decimal(18, 4)
-  precioReferencial    Decimal                @default(0.00) @db.Decimal(18, 2)
-  categoria            String?
-  estado               String                 @default("ACTIVO")
-  createdAt            DateTime               @default(now())
-  updatedAt            DateTime
-  detalle_orden_compra detalle_orden_compra[]
-  movimiento_almacen   movimiento_almacen[]
-}
-
-model interaccion {
-  id            String      @id
-  clientId      String
-  cotizacionId  String?
-  fecha         DateTime    @default(now())
-  tipo          String
-  accion        String
-  observaciones String      @db.Text
-  usuario       String
-  cliente       cliente     @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "INTERACCION_clientId_fkey")
-  cotizacion    cotizacion? @relation(fields: [cotizacionId], references: [id], map: "INTERACCION_cotizacionId_fkey")
-
-  @@index([clientId], map: "INTERACCION_clientId_fkey")
-  @@index([cotizacionId], map: "INTERACCION_cotizacionId_fkey")
-}
-
-model movimiento_almacen {
-  id                     String                  @id
-  insumoId               String
-  tipo                   movimiento_almacen_tipo
-  cantidad               Decimal                 @db.Decimal(18, 4)
-  costoUnitarioHistorico Decimal?                @db.Decimal(18, 2)
-  fecha                  DateTime                @default(now())
-  motivo                 String?
-  usuarioId              String
-  proyectoId             String?
-  ordenCompraId          String?
-  createdAt              DateTime                @default(now())
-  insumo                 insumo                  @relation(fields: [insumoId], references: [id], map: "MOVIMIENTO_ALMACEN_insumoId_fkey")
-  proyecto               proyecto?               @relation(fields: [proyectoId], references: [id], map: "MOVIMIENTO_ALMACEN_proyectoId_fkey")
-
-  @@index([insumoId], map: "MOVIMIENTO_ALMACEN_insumoId_fkey")
-  @@index([proyectoId], map: "MOVIMIENTO_ALMACEN_proyectoId_fkey")
-}
-
-model notificacion {
-  id                   String               @id
-  usuarioId            String?
-  titulo               String
-  mensaje              String               @db.Text
-  tipo                 notificacion_tipo
-  leida                Boolean              @default(false)
-  esGlobal             Boolean              @default(false)
-  fechaProgramada      DateTime?
-  actividadComercialId String?
-  createdAt            DateTime             @default(now())
-  actividad_comercial  actividad_comercial? @relation(fields: [actividadComercialId], references: [id], map: "NOTIFICACION_actividadComercialId_fkey")
-
-  @@index([actividadComercialId], map: "NOTIFICACION_actividadComercialId_fkey")
-}
-
-model orden_compra {
-  id                   String                 @id
-  codigo               String                 @unique(map: "ORDEN_COMPRA_codigo_key")
-  proveedorId          String
-  fechaEmision         DateTime               @default(now())
-  estado               orden_compra_estado    @default(PENDIENTE)
-  montoTotal           Decimal                @default(0.00) @db.Decimal(18, 2)
-  observaciones        String?                @db.Text
-  archivoFactura       String?
-  usuarioId            String
-  createdAt            DateTime               @default(now())
-  updatedAt            DateTime
-  detalle_orden_compra detalle_orden_compra[]
-  gasto                gasto?
-  proveedor            proveedor              @relation(fields: [proveedorId], references: [id], map: "ORDEN_COMPRA_proveedorId_fkey")
-
-  @@index([proveedorId], map: "ORDEN_COMPRA_proveedorId_fkey")
-}
-
-model pago {
-  id              String      @id
-  facturaId       String?
-  gastoId         String?
-  cajaId          String
-  monto           Decimal     @db.Decimal(18, 2)
-  fechaPago       DateTime    @default(now())
-  metodo          pago_metodo @default(TRANSFERENCIA)
-  referencia      String?
-  comprobanteUrl  String?
-  observaciones   String?     @db.Text
-  registradoPorId String
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime
-  caja            caja        @relation(fields: [cajaId], references: [id], map: "PAGO_cajaId_fkey")
-  factura         factura?    @relation(fields: [facturaId], references: [id], onDelete: Cascade, map: "PAGO_facturaId_fkey")
-  gasto           gasto?      @relation(fields: [gastoId], references: [id], onDelete: Cascade, map: "PAGO_gastoId_fkey")
-
-  @@index([cajaId], map: "PAGO_cajaId_fkey")
-  @@index([facturaId], map: "PAGO_facturaId_idx")
-  @@index([gastoId], map: "PAGO_gastoId_idx")
-}
-
-model planodiseno {
-  id                 String           @id
-  ingenieriaDisenoId String
-  numero             String
-  titulo             String
-  descripcion        String?          @db.Text
-  url                String
-  version            String
-  fecha              DateTime
-  estado             String
-  ingenieriadiseno   ingenieriadiseno @relation(fields: [ingenieriaDisenoId], references: [id], map: "PlanoDiseno_ingenieriaDisenoId_fkey")
-
-  @@index([ingenieriaDisenoId], map: "PlanoDiseno_ingenieriaDisenoId_fkey")
-}
-
-model proveedor {
-  id           String         @id
-  ruc          String         @unique(map: "Proveedor_ruc_key")
-  razonSocial  String
-  contacto     String?
-  telefono     String?
-  email        String?
-  direccion    String?        @db.Text
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime
-  gasto        gasto[]
-  orden_compra orden_compra[]
-}
-
-model proyecto {
-  id                      String               @id
-  clientId                String?
-  codigo                  String               @unique(map: "PROYECTO_codigo_key")
-  nombre                  String
-  descripcion             String?              @db.Text
-  estado                  proyecto_estado
-  semaforo                proyecto_semaforo
-  prioridad               proyecto_prioridad
-  fechaInicio             DateTime
-  fechaFinEstimada        DateTime
-  fechaFinReal            DateTime?
-  responsablePrincipalId  String
-  responsablesAdicionales String               @db.LongText
-  area                    proyecto_area
-  avance                  Float                @default(0)
-  avanceCalculado         Float                @default(0)
-  costoPresupuestado      Decimal              @default(0.00) @db.Decimal(18, 2)
-  costoTotalReal          Decimal              @default(0.00) @db.Decimal(18, 2)
-  utilidadProyectada      Decimal              @default(0.00) @db.Decimal(18, 2)
-  presupuestoMateriales   Decimal              @default(0.00) @db.Decimal(18, 2)
-  presupuestoManoObra     Decimal              @default(0.00) @db.Decimal(18, 2)
-  presupuestoServicios    Decimal              @default(0.00) @db.Decimal(18, 2)
-  consumoMaterialesReal   Decimal              @default(0.00) @db.Decimal(18, 2)
-  consumoManoObraReal     Decimal              @default(0.00) @db.Decimal(18, 2)
-  consumoServiciosReal    Decimal              @default(0.00) @db.Decimal(18, 2)
-  creadoPor               String?
-  fechaCreacion           DateTime             @default(now())
-  actualizadoPor          String?
-  fechaActualizacion      DateTime?
-  margenMeta              Decimal              @default(0.00) @db.Decimal(18, 2)
-  ventaContratada         Decimal              @default(0.00) @db.Decimal(18, 2)
-  actividad               actividad[]
-  adelanto_proyecto       adelanto_proyecto[]
-  comentario              comentario[]
-  cotizacion              cotizacion?
-  documento               documento[]
-  evaluaciontecnica       evaluaciontecnica?
-  evidencia               evidencia[]
-  expedientetecnico       expedientetecnico?
-  factura                 factura[]
-  gasto                   gasto[]
-  historialcambio         historialcambio[]
-  indicadoravance         indicadoravance[]
-  ingenieriadiseno        ingenieriadiseno?
-  movimiento_almacen      movimiento_almacen[]
-  cliente                 cliente?             @relation(fields: [clientId], references: [id], map: "PROYECTO_clientId_fkey")
-  responsable             responsable          @relation(fields: [responsablePrincipalId], references: [id], map: "PROYECTO_responsablePrincipalId_fkey")
-  reportediario           reportediario[]
-  suboperacion            suboperacion[]
-
-  @@index([clientId], map: "PROYECTO_clientId_fkey")
-  @@index([responsablePrincipalId], map: "PROYECTO_responsablePrincipalId_fkey")
-}
-
-model rendicion {
-  id              String   @id
-  gastoId         String
-  monto           Decimal  @db.Decimal(18, 2)
-  fecha           DateTime @default(now())
-  comprobanteUrl  String?
-  observaciones   String?  @db.Text
-  registradoPorId String
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime
-  gasto           gasto    @relation(fields: [gastoId], references: [id], onDelete: Cascade, map: "RENDICION_gastoId_fkey")
-
-  @@index([gastoId], map: "RENDICION_gastoId_idx")
-}
-
-model reportediario {
-  id            String                    @id
-  proyectoId    String
-  fecha         DateTime
-  usuario       String
-  usuarioArea   reportediario_usuarioArea
-  actividades   String                    @db.Text
-  hallazgos     String                    @db.Text
-  personal      String                    @db.Text
-  proximosPasos String                    @db.Text
-  estado        String
-  evidencia     evidencia[]
-  proyecto      proyecto                  @relation(fields: [proyectoId], references: [id], map: "ReporteDiario_proyectoId_fkey")
-
-  @@index([proyectoId], map: "ReporteDiario_proyectoId_fkey")
-}
-
-model responsable {
-  id               String           @id
-  nombre           String
-  area             responsable_area
-  cargo            String
-  email            String?
-  telefono         String?
-  avatar           String?
-  color            String
-  esSubresponsable Boolean?         @default(false)
-  reportesA        String?
-  activo           Boolean?         @default(true)
-  actividad        actividad[]
-  cliente          cliente[]
-  ficha_tecnica    ficha_tecnica[]
-  proyecto         proyecto[]
-  suboperacion     suboperacion[]
-  subtarea         subtarea[]
-  usuario          usuario?
-}
-
-model suboperacion {
-  id                     String              @id
-  proyectoId             String
-  actividadPadreId       String?
-  titulo                 String
-  descripcion            String              @db.Text
-  tipo                   suboperacion_tipo
-  responsablePrincipalId String
-  responsablesApoyo      String              @db.LongText
-  fechaInicio            DateTime
-  fechaFinEstimada       DateTime
-  fechaFinReal           DateTime?
-  progreso               Float               @default(0)
-  estado                 suboperacion_estado
-  entregable             entregable[]
-  proyecto               proyecto            @relation(fields: [proyectoId], references: [id], map: "Suboperacion_proyectoId_fkey")
-  responsable            responsable         @relation(fields: [responsablePrincipalId], references: [id], map: "Suboperacion_responsablePrincipalId_fkey")
-
-  @@index([proyectoId], map: "Suboperacion_proyectoId_fkey")
-  @@index([responsablePrincipalId], map: "Suboperacion_responsablePrincipalId_fkey")
-}
-
-model subtarea {
-  id               String       @id
-  actividadId      String
-  descripcion      String       @db.Text
-  completada       Boolean      @default(false)
-  responsableId    String?
-  fechaVencimiento DateTime?
-  fechaCompletada  DateTime?
-  bloqueada        Boolean?     @default(false)
-  motivoBloqueo    String?
-  actividad        actividad    @relation(fields: [actividadId], references: [id], map: "Subtarea_actividadId_fkey")
-  responsable      responsable? @relation(fields: [responsableId], references: [id], map: "Subtarea_responsableId_fkey")
-
-  @@index([actividadId], map: "Subtarea_actividadId_fkey")
-  @@index([responsableId], map: "Subtarea_responsableId_fkey")
-}
-
-model transaccion_caja {
-  id              String                @id
-  cajaId          String
-  tipo            transaccion_caja_tipo
-  monto           Decimal               @db.Decimal(18, 2)
-  concepto        String
-  referenciaTipo  String?
-  referenciaId    String?
-  fecha           DateTime              @default(now())
-  usuarioId       String
-  saldoRealPrevio Decimal               @db.Decimal(18, 2)
-  saldoRealNuevo  Decimal               @db.Decimal(18, 2)
-  caja            caja                  @relation(fields: [cajaId], references: [id], map: "TRANSACCION_CAJA_cajaId_fkey")
-
-  @@index([cajaId], map: "TRANSACCION_CAJA_cajaId_idx")
-  @@index([fecha], map: "TRANSACCION_CAJA_fecha_idx")
-}
-
-model usuario {
-  id               String             @id
-  username         String             @unique(map: "Usuario_username_key")
-  password         String
-  nombre           String
-  rol              String             @default("USER")
-  activo           Boolean            @default(true)
-  responsableId    String?            @unique(map: "Usuario_responsableId_key")
-  modulos          String             @db.LongText
-  ultimaActividad  DateTime?          @default(now())
-  fechaCreacion    DateTime           @default(now())
-  aprobacion_gasto aprobacion_gasto[]
-  audit_log        audit_log[]
-  responsable      responsable?       @relation(fields: [responsableId], references: [id], map: "Usuario_responsableId_fkey")
-}
-
-model validacionrequerida {
-  id              String                     @id
-  actividadId     String
-  tipo            validacionrequerida_tipo
-  area            validacionrequerida_area
-  estado          validacionrequerida_estado
-  validadoPor     String?
-  fechaValidacion DateTime?
-  observaciones   String?                    @db.Text
-  evidenciaUrl    String?
-  actividad       actividad                  @relation(fields: [actividadId], references: [id], map: "ValidacionRequerida_actividadId_fkey")
-
-  @@index([actividadId], map: "ValidacionRequerida_actividadId_fkey")
-}
-
-enum configuracion_aprobacion_tipoGasto {
-  OPERATIVO
-  ADMINISTRATIVO
-  FINANCIERO
-  PROYECTO
-  PERSONAL
-  INVERSION
-  PLANILLA
-  IMPUESTOS
-  PRESTAMO
-  VIATICOS
-  COMBUSTIBLE
-  MANTENIMIENTO
-  SERVICIOS
-}
-
-enum distribucion_adelanto_categoria {
-  MATERIALES
-  MANO_OBRA
-  LOGISTICA_MOVILIDAD
-  OPERATIVO_VARIO
-  UTILIDAD_RESERVA
-}
-
-enum indicadoravance_area {
+// ============================================
+// ENUMS
+// ============================================
+
+enum Area {
   LogisticaYRecursos
   IngenieriaYSupervision
   GestionDocumentaria
   OperacionesDeCampo
 }
 
-enum movimiento_almacen_tipo {
-  ENTRADA
-  SALIDA
+enum Prioridad {
+  Baja
+  Media
+  Alta
+  Critica
 }
 
-enum responsable_area {
-  LogisticaYRecursos
-  IngenieriaYSupervision
-  GestionDocumentaria
-  OperacionesDeCampo
+enum PrioridadGasto {
+  BAJA
+  MEDIA
+  ALTA
+  CRITICA
 }
 
-enum transaccion_caja_tipo {
-  INGRESO
-  EGRESO
-  BLOQUEO
-  LIBERACION
+enum EstadoProyecto {
+  Planificacion
+  EnEjecucion
+  Detenido
+  Finalizado
 }
 
-enum validacionrequerida_tipo {
-  Tecnica
-  Campo
-  Documental
-  Calidad
+enum Semaforo {
+  Verde
+  Amarillo
+  Rojo
 }
 
-enum actividad_tipo {
+enum TipoActividad {
   Tecnica
   Administrativa
   Logistica
@@ -938,7 +54,56 @@ enum actividad_tipo {
   Validacion
 }
 
-enum actividad_comercial_tipoActividad {
+enum TipoValidacion {
+  Tecnica
+  Campo
+  Documental
+  Calidad
+}
+
+enum EstadoActividad {
+  Pendiente
+  EnProgreso
+  Completada
+  Validada
+  Bloqueada
+}
+
+enum EstadoValidacion {
+  Pendiente
+  Aprobada
+  Rechazada
+  Observada
+}
+
+enum TipoDocumento {
+  Tecnica
+  Administrativa
+  Legal
+  Financiero
+  Otro
+}
+
+enum EstadoDocumento {
+  Borrador
+  PendienteRevision
+  Aprobado
+  Obsoleto
+}
+
+enum TipoCliente {
+  PROSPECTO
+  CLIENTE
+  CLIENTE_INACTIVO
+}
+
+enum ClasificacionCliente {
+  MUY_RENTABLE
+  RENTABLE
+  POCO_RENTABLE
+}
+
+enum TipoActividadComercial {
   LLAMADA
   CORREO
   WHATSAPP
@@ -948,43 +113,13 @@ enum actividad_comercial_tipoActividad {
   SEGUIMIENTO
 }
 
-enum validacionrequerida_area {
-  LogisticaYRecursos
-  IngenieriaYSupervision
-  GestionDocumentaria
-  OperacionesDeCampo
+enum EstadoActividadComercial {
+  PENDIENTE
+  COMPLETADA
+  CANCELADA
 }
 
-enum actividad_prioridad {
-  Baja
-  Media
-  Alta
-  Critica
-}
-
-enum adelanto_proyecto_metodo {
-  TRANSFERENCIA
-  EFECTIVO
-  CHEQUE
-  TARJETA
-  OTRO
-}
-
-enum comentario_usuarioArea {
-  LogisticaYRecursos
-  IngenieriaYSupervision
-  GestionDocumentaria
-  OperacionesDeCampo
-}
-
-enum configuracion_aprobacion_prioridad {
-  BAJA
-  MEDIA
-  ALTA
-  CRITICA
-}
-
-enum notificacion_tipo {
+enum TipoNotificacion {
   SEGUIMIENTO
   VISITA
   COTIZACION
@@ -994,71 +129,79 @@ enum notificacion_tipo {
   ALERTA
 }
 
-enum orden_compra_estado {
+enum SubtipoCaja {
+  OPERATIVA
+  OBLIGACIONES
+  RESERVA
+}
+
+enum EstadoHitoPago {
+  PENDIENTE
+  FACTURADO
+  COBRADO
+}
+
+enum EstadoAprobacion {
+  APROBADO
+  RECHAZADO
+  OBSERVADO
+}
+
+enum EstadoRendicion {
+  PENDIENTE
+  COMPLETADA
+  EXCEDIDA
+}
+
+enum NivelAprobacion {
+  PENDIENTE_FINANZAS
+  PENDIENTE_GERENCIA
+  APROBADO
+  RECHAZADO
+}
+
+enum MetodoPago {
+  TRANSFERENCIA
+  EFECTIVO
+  CHEQUE
+  TARJETA
+  OTRO
+}
+
+enum CategoriaDistribucion {
+  MATERIALES
+  MANO_OBRA
+  LOGISTICA_MOVILIDAD
+  OPERATIVO_VARIO
+  UTILIDAD_RESERVA
+}
+
+enum TipoMovimiento {
+  ENTRADA
+  SALIDA
+}
+
+enum TipoTransaccionCaja {
+  INGRESO
+  EGRESO
+  BLOQUEO
+  LIBERACION
+}
+
+enum EstadoCompra {
   PENDIENTE
   APROBADO
   RECIBIDO
   CANCELADO
 }
 
-enum reportediario_usuarioArea {
-  LogisticaYRecursos
-  IngenieriaYSupervision
-  GestionDocumentaria
-  OperacionesDeCampo
-}
-
-enum validacionrequerida_estado {
-  Pendiente
-  Aprobada
-  Rechazada
-  Observada
-}
-
-enum actividad_estado {
-  Pendiente
-  EnProgreso
-  Completada
-  Validada
-  Bloqueada
-}
-
-enum aprobacion_gasto_estado {
-  APROBADO
-  RECHAZADO
-  OBSERVADO
-}
-
-enum factura_clasificacion {
+enum ClasificacionFinanciera {
   VENTA_SERVICIO
   PROYECTO
   ALQUILER_EQUIPOS
 }
 
-enum proyecto_estado {
-  Planificacion
-  EnEjecucion
-  Detenido
-  Finalizado
-}
-
-enum suboperacion_tipo {
-  Tecnica
-  Administrativa
-  Logistica
-  Documental
-  Validacion
-}
-
-enum documento_tipo {
-  Tecnica
-  Administrativa
-  Legal
-  Financiero
-  Otro
-}
-
-enum gasto_tipo {
+enum TipoGasto {
   OPERATIVO
   ADMINISTRATIVO
   FINANCIERO
@@ -1074,97 +217,7 @@ enum gasto_tipo {
   SERVICIOS
 }
 
-enum hito_pago_estado {
-  PENDIENTE
-  FACTURADO
-  COBRADO
-}
-
-enum pago_metodo {
-  TRANSFERENCIA
-  EFECTIVO
-  CHEQUE
-  TARJETA
-  OTRO
-}
-
-enum proyecto_semaforo {
-  Verde
-  Amarillo
-  Rojo
-}
-
-enum actividad_comercial_estado {
-  PENDIENTE
-  COMPLETADA
-  CANCELADA
-}
-
-enum gasto_clasificacion {
-  VENTA_SERVICIO
-  PROYECTO
-  ALQUILER_EQUIPOS
-}
-
-enum historialcambio_area {
-  LogisticaYRecursos
-  IngenieriaYSupervision
-  GestionDocumentaria
-  OperacionesDeCampo
-}
-
-enum proyecto_prioridad {
-  Baja
-  Media
-  Alta
-  Critica
-}
-
-enum gasto_categoriaDistribucion {
-  MATERIALES
-  MANO_OBRA
-  LOGISTICA_MOVILIDAD
-  OPERATIVO_VARIO
-  UTILIDAD_RESERVA
-}
-
-enum documento_estado {
-  Borrador
-  PendienteRevision
-  Aprobado
-  Obsoleto
-}
-
-enum caja_subtipo {
-  OPERATIVA
-  OBLIGACIONES
-  RESERVA
-}
-
-enum factura_estado {
-  PENDIENTE
-  PAGO_PARCIAL
-  PAGADA
-  ANULADA
-  VENCIDA
-}
-
-enum suboperacion_estado {
-  Pendiente
-  EnProgreso
-  Completada
-  Validada
-  Bloqueada
-}
-
-enum proyecto_area {
-  LogisticaYRecursos
-  IngenieriaYSupervision
-  GestionDocumentaria
-  OperacionesDeCampo
-}
-
-enum gasto_estado {
+enum EstadoGasto {
   SOLICITADO
   APROBADO
   PENDIENTE
@@ -1172,41 +225,994 @@ enum gasto_estado {
   ANULADO
 }
 
-enum gasto_area {
-  LogisticaYRecursos
-  IngenieriaYSupervision
-  GestionDocumentaria
-  OperacionesDeCampo
-}
-
-enum gasto_estadoRendicion {
+enum EstadoFactura {
   PENDIENTE
-  COMPLETADA
-  EXCEDIDA
+  PAGO_PARCIAL
+  PAGADA
+  ANULADA
+  VENCIDA
 }
 
-enum gasto_nivelAprobacion {
-  PENDIENTE_FINANZAS
-  PENDIENTE_GERENCIA
-  APROBADO
-  RECHAZADO
+// ============================================
+// MODELS
+// ============================================
+
+model Cliente {
+  id                  String               @id @default(uuid())
+  codigo              String               @unique(map: "CLIENTE_codigo_key")
+  empresa             String
+  ruc                 String?              @unique(map: "CLIENTE_ruc_key")
+  direccion           String
+  tarifa              String               // MT3 | MT4
+  contacto            String
+  telefono            String?
+  cargo               String?
+  correo              String?
+  linkedin            String?
+  cartera             String?
+  asignadoA           String
+  responsableId       String?
+  responsable         Responsable?         @relation("ResponsableClientes", fields: [responsableId], references: [id])
+  diaTrabajo          String?
+  estado              String
+  prioridad           String               // Baja | Media | Alta | Critica
+  accion              String
+  ultimoContacto      DateTime?
+  proximoSeguimiento  DateTime?
+  observaciones       String?              @db.Text
+  zona                String
+  semaforo                String               // Verde | Amarillo | Rojo
+  temperatura         String               // Frio | Tibio | Caliente | Muy Caliente
+  montoEstimado       Decimal              @default(0) @db.Decimal(18, 2)
+  probabilidad        Float                @default(0)
+  ventaProyectada     Decimal              @default(0) @db.Decimal(18, 2)
+  tipoCliente         TipoCliente          @default(PROSPECTO)
+  clasificacion       ClasificacionCliente @default(RENTABLE)
+  esClienteReal       Boolean              @default(false)
+  etapaComercial      String
+
+  interacciones       Interaccion[]
+  actividadesComerciales ActividadComercial[]
+  fichasTecnicas      FichaTecnica[]
+  proyectos           Proyecto[]           @relation("ClienteProyectos")
+  documentos          Documento[]          @relation("ClienteDocumentos")
+  cotizaciones        Cotizacion[]         @relation("ClienteCotizaciones")
+  facturas            Factura[]            @relation("ClienteFacturas")
+
+  hallazgosTecnicos   Json?
+  solucionesPropuestas Json?
+  propuestaTecnicaUrl String?
+
+  deletedAt           DateTime?
+  fechaCreacion       DateTime             @default(now())
+  fechaActualizacion  DateTime?            @updatedAt
+
+  @@index([empresa])
+  @@index([ruc])
+  @@index([zona])
+  @@index([responsableId], map: "cliente_responsableId_fkey")
+  @@map("cliente")
 }
 
-enum cliente_tipoCliente {
-  PROSPECTO
-  CLIENTE
-  CLIENTE_INACTIVO
+model ActividadComercial {
+  id                 String                  @id @default(uuid())
+  clienteId          String
+  cliente            Cliente                 @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  usuarioId          String
+  tipoActividad      TipoActividadComercial
+  descripcion        String                  @db.Text
+  fechaActividad     DateTime                @default(now())
+  proximoSeguimiento DateTime?
+  estado             EstadoActividadComercial @default(PENDIENTE)
+  
+  notificaciones     Notificacion[]
+  
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  @@index([clienteId], map: "actividad_comercial_clienteId_fkey")
+  @@map("actividad_comercial")
 }
 
-enum cliente_clasificacion {
-  MUY_RENTABLE
-  RENTABLE
-  POCO_RENTABLE
+model Notificacion {
+  id                   String            @id @default(uuid())
+  usuarioId            String?
+  titulo               String
+  mensaje              String            @db.Text
+  tipo                 TipoNotificacion
+  leida                Boolean           @default(false)
+  esGlobal             Boolean           @default(false)
+  fechaProgramada      DateTime?
+  actividadComercialId String?
+  actividadComercial   ActividadComercial? @relation(fields: [actividadComercialId], references: [id], onDelete: SetNull)
+  
+  createdAt            DateTime          @default(now())
+
+  @@index([actividadComercialId], map: "notificacion_actividadComercialId_fkey")
+  @@map("notificacion")
 }
 
-enum gasto_prioridad {
-  BAJA
-  MEDIA
-  ALTA
-  CRITICA
+model AuditLog {
+  id            String   @id @default(uuid())
+  usuarioId     String
+  usuario       Usuario  @relation(fields: [usuarioId], references: [id])
+  modulo        String
+  accion        String
+  detalles      Json?
+  ip            String?
+  fechaCreacion DateTime @default(now())
+
+  @@index([usuarioId], map: "audit_log_usuarioId_fkey")
+  @@map("audit_log")
+}
+
+model FichaTecnica {
+  id            String                @id @default(uuid())
+  clienteId     String
+  cliente       Cliente               @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  tecnicoId     String
+  tecnico       Responsable           @relation(fields: [tecnicoId], references: [id])
+  fechaVisita   DateTime
+  observaciones String?               @db.Text
+  hallazgos     String?               @db.Text
+  recomendaciones String?             @db.Text
+  estado        String                // PENDIENTE | COMPLETADA | OBSERVADA
+  firmaTecnico  String?               @db.Text // Base64 or URL
+  
+  datosTecnicos Json?                 @default("{}")
+  adjuntos      FichaTecnicaAdjunto[]
+  
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  @@index([clienteId], map: "ficha_tecnica_clienteId_fkey")
+  @@index([tecnicoId], map: "ficha_tecnica_tecnicoId_fkey")
+  @@map("ficha_tecnica")
+}
+
+model FichaTecnicaAdjunto {
+  id             String       @id @default(uuid())
+  fichaTecnicaId String
+  fichaTecnica   FichaTecnica @relation(fields: [fichaTecnicaId], references: [id], onDelete: Cascade)
+  nombre         String
+  url            String
+  tipo           String       // Imagen | PDF | Documento
+  
+  createdAt      DateTime     @default(now())
+
+  @@index([fichaTecnicaId], map: "ficha_tecnica_adjunto_fichaTecnicaId_fkey")
+  @@map("ficha_tecnica_adjunto")
+}
+
+model Interaccion {
+  id            String      @id @default(uuid())
+  clientId      String
+  cliente       Cliente     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  cotizacionId  String?
+  cotizacion    Cotizacion? @relation(fields: [cotizacionId], references: [id], onDelete: SetNull)
+  fecha         DateTime    @default(now())
+  tipo          String
+  accion        String
+  observaciones String      @db.Text
+  usuario       String
+
+  @@index([clientId], map: "INTERACCION_clientId_fkey")
+  @@index([cotizacionId], map: "INTERACCION_cotizacionId_fkey")
+  @@map("interaccion")
+}
+
+model Cotizacion {
+  id                String       @id @default(uuid())
+  codigo            String       @unique(map: "COTIZACION_codigo_key")
+  clientId          String
+  cliente           Cliente      @relation("ClienteCotizaciones", fields: [clientId], references: [id], onDelete: Cascade)
+  referencia        String?      @db.Text
+  objetivo          String?      @db.Text
+  alcance           Json?        @default("[]")
+  consideraciones   String?      @db.Text
+  entregables       String?      @db.Text
+  monto             Decimal      @default(0) @db.Decimal(18, 2)
+  estado            String       // Pendiente | Enviada | Aprobada | Rechazada
+  fecha             DateTime     @default(now())
+  plazo             String?      @default("7 días")
+  validez           String?      @default("15 días")
+  formaPago         String?      @db.Text
+  observaciones     String?      @db.Text
+  moneda            String       @default("PEN")
+  
+  version           Int          @default(1)
+  cotizacionPadreId String?
+  cotizacionPadre   Cotizacion?  @relation("Revisiones", fields: [cotizacionPadreId], references: [id])
+  revisiones        Cotizacion[] @relation("Revisiones")
+
+  documentos        Documento[]  @relation("CotizacionDocumentos")
+  interacciones     Interaccion[]
+  facturas          Factura[]    @relation("CotizacionFacturas")
+  hitosPago         HitoPago[]
+  
+  proyectoGeneradoId String?     @unique(map: "COTIZACION_proyectoGeneradoId_key")
+  proyectoGenerado   Proyecto?   @relation("CotizacionProyecto", fields: [proyectoGeneradoId], references: [id])
+
+  fechaCreacion       DateTime       @default(now())
+  fechaActualizacion  DateTime?      @updatedAt
+
+  @@index([clientId], map: "COTIZACION_clientId_fkey")
+  @@index([cotizacionPadreId], map: "COTIZACION_cotizacionPadreId_fkey")
+  @@map("cotizacion")
+}
+
+model Responsable {
+  id               String         @id @default(uuid())
+  nombre           String
+  area             Area
+  cargo            String
+  email            String?
+  telefono         String?
+  avatar           String?
+  color            String
+  esSubresponsable Boolean?       @default(false)
+  reportesA        String?
+  activo           Boolean?       @default(true)
+  proyectos        Proyecto[]     @relation("ResponsablePrincipal")
+  actividades      Actividad[]    @relation("ActividadResponsablePrincipal")
+  clientes         Cliente[]      @relation("ResponsableClientes")
+  suboperaciones   Suboperacion[]
+  subtareas        Subtarea[]     @relation("SubtareaResponsable")
+  fichasTecnicas   FichaTecnica[]
+  usuario          Usuario?
+
+  @@map("responsable")
+}
+
+model Usuario {
+  id              String       @id @default(uuid())
+  username        String       @unique(map: "Usuario_username_key")
+  password        String
+  nombre          String
+  rol             String       @default("USER")
+  activo          Boolean      @default(true)
+  responsableId   String?      @unique(map: "Usuario_responsableId_key")
+  responsable     Responsable? @relation(fields: [responsableId], references: [id])
+  modulos         Json         @default("[\"dashboard\"]")
+  ultimaActividad DateTime?    @default(now())
+  auditLogs       AuditLog[]
+  aprobaciones    AprobacionGasto[]
+  fechaCreacion   DateTime     @default(now())
+
+  @@map("usuario")
+}
+
+model Proyecto {
+  id                       String               @id @default(uuid())
+  clientId                 String?
+  cliente                  Cliente?             @relation("ClienteProyectos", fields: [clientId], references: [id])
+  codigo                   String               @unique(map: "Proyecto_codigo_key")
+  nombre                   String
+  descripcion              String?              @db.Text
+  estado                   EstadoProyecto
+  semaforo                 Semaforo
+  prioridad                Prioridad
+
+  fechaInicio              DateTime
+  fechaFinEstimada         DateTime
+  fechaFinReal             DateTime?
+
+  responsablePrincipalId   String
+  responsablePrincipal     Responsable          @relation("ResponsablePrincipal", fields: [responsablePrincipalId], references: [id])
+  responsablesAdicionales  Json                 @default("[]")
+
+  area                     Area
+
+  actividades              Actividad[]
+  reportesDiarios          ReporteDiario[]
+  comentarios              Comentario[]         @relation("ProyectoComentarios")
+  evidencias               Evidencia[]          @relation("ProyectoEvidencias")
+  documentos               Documento[]          @relation("ProyectoDocumentos")
+
+  facturas            Factura[]            @relation("ProyectoFacturas")
+  gastos              Gasto[]              @relation("ProyectoGastos")
+  adelantos           AdelantoProyecto[]   @relation("ProyectoAdelantos")
+  movimientosAlmacen  MovimientoAlmacen[]  @relation("ProyectoMovimientos")
+
+  evaluacionTecnica        EvaluacionTecnica?
+  ingenieriaDiseno         IngenieriaDiseno?
+  expedienteTecnico        ExpedienteTecnico?
+  suboperaciones           Suboperacion[]
+
+  avance                   Float                @default(0)
+  avanceCalculado          Float                @default(0)
+  costoPresupuestado       Decimal              @default(0) @db.Decimal(18, 2)
+  costoTotalReal           Decimal              @default(0) @db.Decimal(18, 2)
+  utilidadProyectada      Decimal              @default(0) @db.Decimal(18, 2)
+  presupuestoMateriales   Decimal              @default(0) @db.Decimal(18, 2)
+  presupuestoManoObra     Decimal              @default(0) @db.Decimal(18, 2)
+  presupuestoServicios    Decimal              @default(0) @db.Decimal(18, 2)
+  consumoMaterialesReal   Decimal              @default(0) @db.Decimal(18, 2)
+  consumoManoObraReal     Decimal              @default(0) @db.Decimal(18, 2)
+  consumoServiciosReal    Decimal              @default(0) @db.Decimal(18, 2)
+  margenMeta              Decimal              @default(0) @db.Decimal(18, 2)
+  ventaContratada         Decimal              @default(0) @db.Decimal(18, 2)
+
+  cotizacionOrigen         Cotizacion?          @relation("CotizacionProyecto")
+
+  historialCambios         HistorialCambio[]    @relation("ProyectoHistorialCambios")
+  indicadoresAvance        IndicadorAvance[]
+
+  creadoPor                String?
+  fechaCreacion            DateTime             @default(now())
+  actualizadoPor           String?
+  fechaActualizacion       DateTime?            @updatedAt
+
+  @@index([clientId], map: "Proyecto_clientId_fkey")
+  @@index([responsablePrincipalId], map: "Proyecto_responsablePrincipalId_fkey")
+  @@map("proyecto")
+}
+
+model Actividad {
+  id                       String               @id @default(uuid())
+  proyectoId               String
+  proyecto                 Proyecto             @relation(fields: [proyectoId], references: [id])
+  descripcion              String               @db.Text
+  tipo                     TipoActividad
+  prioridad                Prioridad
+  estado                   EstadoActividad
+  fechaCreacion            DateTime             @default(now())
+  fechaInicio              DateTime?
+  fechaFin                 DateTime?
+  fechaVencimiento         DateTime?
+
+  responsablePrincipalId   String
+  responsablePrincipal     Responsable          @relation("ActividadResponsablePrincipal", fields: [responsablePrincipalId], references: [id])
+  responsablesApoyo        Json                 @default("[]")
+
+  validacionesRequeridas   ValidacionRequerida[]
+  subtareas                Subtarea[]           @relation("ActividadSubtareas")
+  checklistBloqueado       Boolean?             @default(false)
+  motivoBloqueoChecklist   String?
+  desbloqueadoPor          String?
+  fechaDesbloqueoChecklist DateTime?
+
+  comentarios              Comentario[]         @relation("ActividadComentarios")
+  evidencias               Evidencia[]          @relation("ActividadEvidencias")
+  observaciones            String?              @db.Text
+  seguimientoOperativo     String?              @db.Text
+
+  progreso                 Float                @default(0)
+  ponderacion              Float?
+  orden                    Int?
+
+  historialCambios         HistorialCambio[]    @relation("ActividadHistorialCambios")
+
+  padreId                  String?
+  esSuboperacion           Boolean?             @default(false)
+
+  @@index([proyectoId], map: "Actividad_proyectoId_fkey")
+  @@index([responsablePrincipalId], map: "Actividad_responsablePrincipalId_fkey")
+  @@map("actividad")
+}
+
+model Subtarea {
+  id               String    @id @default(uuid())
+  actividadId      String
+  actividad        Actividad @relation("ActividadSubtareas", fields: [actividadId], references: [id])
+  descripcion      String    @db.Text
+  completada       Boolean   @default(false)
+  responsableId    String?
+  responsable      Responsable? @relation("SubtareaResponsable", fields: [responsableId], references: [id])
+  fechaVencimiento DateTime?
+  fechaCompletada  DateTime?
+  bloqueada        Boolean?  @default(false)
+  motivoBloqueo    String?
+
+  @@index([actividadId], map: "sub_tarea_actividadId_fkey")
+  @@index([responsableId], map: "sub_tarea_responsableId_fkey")
+  @@map("sub_tarea")
+}
+
+model ValidacionRequerida {
+  id              String           @id @default(uuid())
+  actividadId     String
+  actividad       Actividad        @relation(fields: [actividadId], references: [id])
+  tipo            TipoValidacion
+  area            Area
+  estado          EstadoValidacion
+  validadoPor     String?
+  fechaValidacion DateTime?
+  observaciones   String?          @db.Text
+  evidenciaUrl    String?
+
+  @@index([actividadId], map: "validacion_requerida_actividadId_fkey")
+  @@map("validacion_requerida")
+}
+
+model Comentario {
+  id           String      @id @default(uuid())
+  proyectoId   String?
+  proyecto     Proyecto?   @relation("ProyectoComentarios", fields: [proyectoId], references: [id], onDelete: Cascade)
+  actividadId  String?
+  actividad    Actividad?  @relation("ActividadComentarios", fields: [actividadId], references: [id], onDelete: Cascade)
+  usuario      String
+  usuarioArea  Area
+  contenido    String      @db.Text
+  fecha        DateTime    @default(now())
+  esInterno    Boolean     @default(false)
+
+  @@map("comentario")
+}
+
+model Evidencia {
+  id            String         @id @default(uuid())
+  proyectoId    String?
+  proyecto      Proyecto?      @relation("ProyectoEvidencias", fields: [proyectoId], references: [id], onDelete: Cascade)
+  actividadId   String?
+  actividad     Actividad?     @relation("ActividadEvidencias", fields: [actividadId], references: [id], onDelete: Cascade)
+  reporteDiarioId String?
+  reporteDiario ReporteDiario? @relation("ReporteDiarioEvidencias", fields: [reporteDiarioId], references: [id], onDelete: Cascade)
+  nombre        String
+  tipo          String
+  url           String
+  tamano        String
+  subidoPor     String
+  fecha         DateTime       @default(now())
+  descripcion   String?        @db.Text
+
+  @@map("evidencia")
+}
+
+model EvaluacionTecnica {
+  id                 String     @id @default(uuid())
+  proyectoId         String     @unique
+  proyecto           Proyecto   @relation(fields: [proyectoId], references: [id])
+  fechaEvaluacion    DateTime
+  evaluadoPor        String
+  hallazgos          Json       @default("[]")
+  solucionesPropuestas Json     @default("[]")
+  recomendaciones    String     @db.Text
+  estado             String
+  documentoUrl       String?
+
+  @@map("evaluacion_tecnica")
+}
+
+model IngenieriaDiseno {
+  id                    String             @id @default(uuid())
+  proyectoId            String             @unique
+  proyecto              Proyecto           @relation(fields: [proyectoId], references: [id])
+  fechaInicio           DateTime
+  fechaFinEstimada      DateTime?
+  ingenieroResponsable  String
+  planos                PlanoDiseno[]
+  especificaciones      Json               @default("[]")
+  estado                String
+
+  @@map("ingenieria_diseno")
+}
+
+model PlanoDiseno {
+  id                    String             @id @default(uuid())
+  ingenieriaDisenoId    String
+  ingenieriaDiseno      IngenieriaDiseno   @relation(fields: [ingenieriaDisenoId], references: [id])
+  numero                String
+  titulo                String
+  descripcion           String?            @db.Text
+  url                   String
+  version               String
+  fecha                 DateTime
+  estado                String
+
+  @@index([ingenieriaDisenoId], map: "plano_diseno_ingenieriaDisenoId_fkey")
+  @@map("plano_diseno")
+}
+
+model ExpedienteTecnico {
+  id                 String     @id @default(uuid())
+  proyectoId         String     @unique
+  proyecto           Proyecto   @relation(fields: [proyectoId], references: [id])
+  numeroExpediente   String
+  titulo             String
+  descripcion        String?    @db.Text
+  contenido          Documento[] @relation("ExpedienteTecnicoDocumentos")
+  estado             String
+  fechaCreacion      DateTime   @default(now())
+  fechaActualizacion DateTime   @updatedAt
+
+  @@map("expediente_tecnico")
+}
+
+model Documento {
+  id                    String           @id @default(uuid())
+  proyectoId            String?
+  proyecto              Proyecto?        @relation("ProyectoDocumentos", fields: [proyectoId], references: [id])
+  expedienteTecnicoId   String?
+  expedienteTecnico     ExpedienteTecnico? @relation("ExpedienteTecnicoDocumentos", fields: [expedienteTecnicoId], references: [id])
+  clientId              String?
+  cliente               Cliente?         @relation("ClienteDocumentos", fields: [clientId], references: [id])
+  cotizacionId          String?
+  cotizacion            Cotizacion?      @relation("CotizacionDocumentos", fields: [cotizacionId], references: [id])
+  nombre                String
+  tipo                  TipoDocumento
+  subtype               String?
+  numero                String?
+  url                   String
+  version               String?
+  estado                EstadoDocumento
+  subidoPor             String
+  tamano                String?
+  fechaSubida           DateTime         @default(now())
+  fechaVencimiento      DateTime?
+  observaciones         String?          @db.Text
+  esEntregable          Boolean?         @default(false)
+
+  @@index([clientId], map: "Documento_clientId_fkey")
+  @@index([cotizacionId], map: "Documento_cotizacionId_fkey")
+  @@index([proyectoId], map: "Documento_proyectoId_fkey")
+  @@index([expedienteTecnicoId], map: "documento_expedienteTecnicoId_fkey")
+  @@map("documento")
+}
+
+model Suboperacion {
+  id                     String             @id @default(uuid())
+  proyectoId             String
+  proyecto               Proyecto           @relation(fields: [proyectoId], references: [id])
+  actividadPadreId       String?
+  titulo                 String
+  descripcion            String             @db.Text
+  tipo                   TipoActividad
+  responsablePrincipalId String
+  responsablePrincipal   Responsable        @relation(fields: [responsablePrincipalId], references: [id])
+  responsablesApoyo      Json               @default("[]")
+  fechaInicio            DateTime
+  fechaFinEstimada       DateTime
+  fechaFinReal           DateTime?
+  progreso               Float              @default(0)
+  estado                 EstadoActividad
+  entregables            Entregable[]
+
+  @@index([proyectoId], map: "sub_operacion_proyectoId_fkey")
+  @@index([responsablePrincipalId], map: "sub_operacion_responsablePrincipalId_fkey")
+  @@map("sub_operacion")
+}
+
+model Entregable {
+  id             String        @id @default(uuid())
+  suboperacionId String
+  suboperacion   Suboperacion  @relation(fields: [suboperacionId], references: [id])
+  nombre         String
+  descripcion    String?       @db.Text
+  tipo           String
+  url            String?
+  estado         String
+  fechaEntrega   DateTime?
+  fechaAprobacion DateTime?
+  aprobadoPor    String?
+
+  @@index([suboperacionId], map: "entregable_suboperacionId_fkey")
+  @@map("entregable")
+}
+
+model ReporteDiario {
+  id             String      @id @default(uuid())
+  proyectoId     String
+  proyecto       Proyecto    @relation(fields: [proyectoId], references: [id])
+  fecha          DateTime
+  usuario        String
+  usuarioArea    Area
+  actividades    String      @db.Text
+  hallazgos      String      @db.Text
+  personal       String      @db.Text
+  proximosPasos  String      @db.Text
+  evidencias     Evidencia[] @relation("ReporteDiarioEvidencias")
+  estado         String
+
+  @@index([proyectoId], map: "reporte_diario_proyectoId_fkey")
+  @@map("reporte_diario")
+}
+
+model HistorialCambio {
+  id          String      @id @default(uuid())
+  proyectoId  String?
+  proyecto    Proyecto?   @relation("ProyectoHistorialCambios", fields: [proyectoId], references: [id], onDelete: Cascade)
+  actividadId String?
+  actividad   Actividad?  @relation("ActividadHistorialCambios", fields: [actividadId], references: [id], onDelete: Cascade)
+  campo       String
+  valorAnterior String    @db.Text
+  valorNuevo  String    @db.Text
+  usuario     String
+  area        Area
+  fecha       DateTime  @default(now())
+  motivo      String?   @db.Text
+
+  @@index([actividadId], map: "historial_cambio_actividadId_fkey")
+  @@index([proyectoId], map: "historial_cambio_proyectoId_fkey")
+  @@map("historial_cambio")
+}
+
+model IndicadorAvance {
+  id                  String   @id @default(uuid())
+  proyectoId          String
+  proyecto            Proyecto @relation(fields: [proyectoId], references: [id])
+  area                Area
+  porcentaje          Float
+  actividadesTotal    Int
+  actividadesCompletadas Int
+  ultimaActualizacion DateTime
+
+  @@index([proyectoId], map: "indicador_avance_proyectoId_fkey")
+  @@map("indicador_avance")
+}
+
+model Proveedor {
+  id           String        @id @default(uuid())
+  ruc          String        @unique
+  razonSocial  String
+  contacto     String?
+  telefono     String?
+  email        String?
+  direccion    String?       @db.Text
+  ordenes      OrdenCompra[]
+  gastos       Gasto[]       @relation("ProveedorGastos")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@map("proveedor")
+}
+
+model Insumo {
+  id                String               @id @default(uuid())
+  nombre            String
+  descripcion       String?              @db.Text
+  unidadMedida      String
+  stockActual       Decimal              @default(0) @db.Decimal(18, 4)
+  stockMinimo       Decimal              @default(0) @db.Decimal(18, 4)
+  precioReferencial Decimal              @default(0) @db.Decimal(18, 2)
+  categoria         String?
+  estado            String               @default("ACTIVO")
+  detallesCompra    DetalleOrdenCompra[]
+  movimientos       MovimientoAlmacen[]
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  @@map("insumo")
+}
+
+model OrdenCompra {
+  id             String               @id @default(uuid())
+  codigo         String               @unique
+  proveedorId    String
+  proveedor      Proveedor            @relation(fields: [proveedorId], references: [id])
+  fechaEmision   DateTime             @default(now())
+  estado         EstadoCompra         @default(PENDIENTE)
+  montoTotal     Decimal              @default(0) @db.Decimal(18, 2)
+  observaciones  String?              @db.Text
+  archivoFactura String?
+  usuarioId      String
+  items          DetalleOrdenCompra[]
+  gasto          Gasto?               @relation("OrdenCompraGasto")
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([proveedorId], map: "orden_compra_proveedorId_fkey")
+  @@map("orden_compra")
+}
+
+model DetalleOrdenCompra {
+  id            String      @id @default(uuid())
+  ordenId       String
+  orden         OrdenCompra @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  insumoId      String
+  insumo        Insumo      @relation(fields: [insumoId], references: [id])
+  cantidad      Decimal     @db.Decimal(18, 4)
+  precioUnitario Decimal    @db.Decimal(18, 2)
+  subtotal      Decimal     @db.Decimal(18, 2)
+
+  @@index([insumoId], map: "detalle_orden_compra_insumoId_fkey")
+  @@index([ordenId], map: "detalle_orden_compra_ordenId_fkey")
+  @@map("detalle_orden_compra")
+}
+
+model MovimientoAlmacen {
+  id             String         @id @default(uuid())
+  insumoId       String
+  insumo         Insumo         @relation(fields: [insumoId], references: [id])
+  tipo           TipoMovimiento
+  cantidad       Decimal        @db.Decimal(18, 4)
+  costoUnitarioHistorico Decimal? @db.Decimal(18, 2)
+  fecha          DateTime       @default(now())
+  motivo         String?
+  usuarioId      String
+
+  proyectoId     String?
+  proyecto       Proyecto?      @relation("ProyectoMovimientos", fields: [proyectoId], references: [id])
+
+  ordenCompraId  String?
+  createdAt      DateTime       @default(now())
+
+  @@index([insumoId], map: "movimiento_almacen_insumoId_fkey")
+  @@index([proyectoId], map: "movimiento_almacen_proyectoId_fkey")
+  @@map("movimiento_almacen")
+}
+
+model AdelantoProyecto {
+  id               String      @id @default(uuid())
+  proyectoId       String
+  proyecto         Proyecto    @relation("ProyectoAdelantos", fields: [proyectoId], references: [id], onDelete: Cascade)
+
+  monto            Decimal     @db.Decimal(18, 2)
+  fechaRecibido    DateTime    @default(now())
+  metodo           MetodoPago  @default(TRANSFERENCIA)
+  referencia       String?
+  comprobanteUrl   String?
+
+  montoAplicado    Decimal     @default(0) @db.Decimal(18, 2)
+  saldoDisponible  Decimal     @default(0) @db.Decimal(18, 2)
+
+  observaciones    String?     @db.Text
+  registradoPorId  String
+
+  distribuciones   DistribucionAdelanto[]
+
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@index([proyectoId], map: "adelanto_proyecto_proyectoId_fkey")
+  @@map("adelanto_proyecto")
+}
+
+model DistribucionAdelanto {
+  id               String      @id @default(uuid())
+  adelantoId       String
+  adelanto         AdelantoProyecto @relation(fields: [adelantoId], references: [id], onDelete: Cascade)
+
+  categoria        CategoriaDistribucion
+  montoAsignado    Decimal     @db.Decimal(18, 2)
+  montoGastado     Decimal     @default(0) @db.Decimal(18, 2)
+  saldoDisponible  Decimal     @db.Decimal(18, 2)
+
+  @@index([adelantoId], map: "distribucion_adelanto_adelantoId_fkey")
+  @@map("distribucion_adelanto")
+}
+
+model Factura {
+  id               String        @id @default(uuid())
+  codigo           String        @unique
+
+  clienteId        String
+  cliente          Cliente       @relation("ClienteFacturas", fields: [clienteId], references: [id])
+
+  proyectoId       String?
+  proyecto         Proyecto?     @relation("ProyectoFacturas", fields: [proyectoId], references: [id])
+
+  cotizacionId     String?
+  cotizacion       Cotizacion?   @relation("CotizacionFacturas", fields: [cotizacionId], references: [id])
+
+  clasificacion    ClasificacionFinanciera @default(VENTA_SERVICIO)
+  montoSubtotal    Decimal       @default(0) @db.Decimal(18, 2)
+  montoIgv         Decimal       @default(0) @db.Decimal(18, 2)
+  montoTotal       Decimal       @default(0) @db.Decimal(18, 2)
+  saldoPendiente   Decimal       @default(0) @db.Decimal(18, 2)
+
+  fechaEmision     DateTime      @default(now())
+  fechaVencimiento DateTime
+
+  estado           EstadoFactura @default(PENDIENTE)
+  observaciones    String?       @db.Text
+  archivoUrl       String?
+  
+  esRecurrente        Boolean   @default(false)
+  frecuencia          String?
+  proximaFacturacion  DateTime?
+  notificadoCobranza  Boolean   @default(false)
+  fechaEstimadaCobro  DateTime?
+  hitoPagoId          String?
+  hitoPago            HitoPago? @relation(fields: [hitoPagoId], references: [id])
+
+  pagos            Pago[]
+
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([clienteId])
+  @@index([proyectoId])
+  @@index([estado])
+  @@index([fechaEmision])
+  @@index([fechaEstimadaCobro])
+  @@index([hitoPagoId])
+  @@index([cotizacionId], map: "factura_cotizacionId_fkey")
+  @@map("factura")
+}
+
+model Pago {
+  id               String      @id @default(uuid())
+  facturaId        String?
+  factura          Factura?    @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  gastoId          String?
+  gasto            Gasto?      @relation(fields: [gastoId], references: [id], onDelete: Cascade)
+  cajaId           String
+  caja             Caja        @relation(fields: [cajaId], references: [id])
+
+  monto            Decimal     @db.Decimal(18, 2)
+  fechaPago        DateTime    @default(now())
+  metodo           MetodoPago  @default(TRANSFERENCIA)
+  referencia       String?
+  comprobanteUrl   String?
+  observaciones    String?     @db.Text
+
+  registradoPorId  String
+
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@index([facturaId])
+  @@index([gastoId])
+  @@index([cajaId], map: "pago_cajaId_fkey")
+  @@map("pago")
+}
+
+model Gasto {
+  id               String       @id @default(uuid())
+  codigo           String?
+
+  proveedorId      String?
+  proveedor        Proveedor?   @relation("ProveedorGastos", fields: [proveedorId], references: [id])
+
+  proyectoId       String?
+  proyecto         Proyecto?    @relation("ProyectoGastos", fields: [proyectoId], references: [id])
+
+  ordenCompraId    String?      @unique
+  ordenCompra      OrdenCompra? @relation("OrdenCompraGasto", fields: [ordenCompraId], references: [id])
+
+  cajaId           String?
+  caja             Caja?        @relation(fields: [cajaId], references: [id])
+
+  tipo             TipoGasto    @default(OPERATIVO)
+  clasificacion    ClasificacionFinanciera @default(VENTA_SERVICIO)
+  categoriaDistribucion CategoriaDistribucion?
+  concepto         String       @db.Text
+  montoTotal       Decimal      @db.Decimal(18, 2)
+  saldoPendiente   Decimal      @db.Decimal(18, 2)
+
+  fechaEmision     DateTime     @default(now())
+  fechaVencimiento DateTime?
+  fechaPago        DateTime?
+
+  estado           EstadoGasto  @default(PENDIENTE)
+  comprobanteUrl   String?
+
+  registradoPorId  String
+
+  aprobaciones     AprobacionGasto[]
+  rendiciones      Rendicion[]
+  
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  aprobadorFinanzasId String?
+  aprobadorGerenciaId String?
+  area                Area?
+  estadoRendicion     EstadoRendicion? @default(PENDIENTE)
+  justificacion       String?          @db.Text
+  montoRendido        Decimal?         @default(0.00) @db.Decimal(18, 2)
+  nivelAprobacion     NivelAprobacion?
+  solicitanteId       String?
+  fechaProgramadaPago DateTime?
+  nivelActual         Int              @default(0)
+  prioridad           PrioridadGasto   @default(MEDIA)
+
+  pagos            Pago[]
+
+  @@index([cajaId])
+  @@index([fechaProgramadaPago])
+  @@index([proveedorId])
+  @@index([proyectoId])
+  @@map("gasto")
+}
+
+model Caja {
+  id                String      @id @default(uuid())
+  nombre            String      @unique
+  tipo              String      @default("BANCO")
+  moneda            String      @default("PEN")
+  esProtegida       Boolean     @default(false)
+  esPrincipal       Boolean     @default(false)
+  porcentajeProvision Decimal   @default(0.00) @db.Decimal(18, 2)
+  subtipo           SubtipoCaja @default(OPERATIVA)
+
+  saldoReal         Decimal     @default(0) @db.Decimal(18, 2)
+  saldoComprometido Decimal     @default(0) @db.Decimal(18, 2)
+  saldoDisponible   Decimal     @default(0) @db.Decimal(18, 2)
+
+  transacciones     TransaccionCaja[]
+  gastos            Gasto[]
+  pagos               Pago[]
+
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@map("caja")
+}
+
+model TransaccionCaja {
+  id               String               @id @default(uuid())
+  cajaId           String
+  caja             Caja                 @relation(fields: [cajaId], references: [id])
+  
+  tipo             TipoTransaccionCaja
+  monto            Decimal              @db.Decimal(18, 2)
+  concepto         String
+  referenciaTipo   String?
+  referenciaId     String?
+  
+  fecha            DateTime             @default(now())
+  usuarioId        String
+  
+  saldoRealPrevio  Decimal              @db.Decimal(18, 2)
+  saldoRealNuevo   Decimal              @db.Decimal(18, 2)
+
+  @@index([cajaId])
+  @@index([fecha])
+  @@map("transaccion_caja")
+}
+
+model AprobacionGasto {
+  id String @id @default(uuid())
+  gastoId    String
+  usuarioId  String
+  nivel      Int
+  rol        String
+  estado     EstadoAprobacion        @default(APROBADO)
+  comentario String?                 @db.Text
+  fecha      DateTime                @default(now())
+  gasto      Gasto                   @relation(fields: [gastoId], references: [id], onDelete: Cascade)
+  usuario    Usuario                 @relation(fields: [usuarioId], references: [id])
+
+  @@index([gastoId])
+  @@index([usuarioId])
+  @@map("aprobacion_gasto")
+}
+
+model ConfiguracionAprobacion {
+  id String @id @default(uuid())
+  tipoGasto        TipoGasto
+  montoMinimo      Decimal                            @db.Decimal(18, 2)
+  montoMaximo      Decimal                            @db.Decimal(18, 2)
+  prioridad        PrioridadGasto                     @default(MEDIA)
+  rolesAprobadores Json                               @default("[]")
+  activo           Boolean                            @default(true)
+  createdAt        DateTime                           @default(now())
+  updatedAt        DateTime                           @updatedAt
+
+  @@map("configuracion_aprobacion")
+}
+
+model HitoPago {
+  id String @id @default(uuid())
+  cotizacionId  String
+  descripcion   String
+  porcentaje    Decimal          @db.Decimal(5, 2)
+  monto         Decimal          @db.Decimal(18, 2)
+  fechaEstimada DateTime?
+  estado        EstadoHitoPago   @default(PENDIENTE)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  facturas      Factura[]
+  cotizacion    Cotizacion       @relation(fields: [cotizacionId], references: [id], onDelete: Cascade)
+
+  @@index([cotizacionId])
+  @@map("hito_pago")
+}
+
+model Rendicion {
+  id String @id @default(uuid())
+  gastoId         String
+  monto           Decimal  @db.Decimal(18, 2)
+  fecha           DateTime @default(now())
+  comprobanteUrl  String?
+  observaciones   String?  @db.Text
+  registradoPorId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  gasto           Gasto    @relation(fields: [gastoId], references: [id], onDelete: Cascade)
+
+  @@index([gastoId])
+  @@map("rendicion")
 }

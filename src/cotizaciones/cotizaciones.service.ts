@@ -20,19 +20,6 @@ export class CotizacionesService {
 
   async create(dto: CreateCotizacionDto) {
     try {
-      // VALIDACIÓN: Evitar propuestas duplicadas para el mismo cliente
-      const existingQuote = await this.prisma.cotizacion.findFirst({
-        where: { clientId: dto.clientId },
-      });
-
-      if (existingQuote) {
-        throw new BadRequestException({
-          message:
-            'Ya existe una propuesta técnica registrada para este cliente. Solo puede editar la propuesta existente.',
-          error: 'Propuesta Duplicada',
-        });
-      }
-
       const {
         fileUrl,
         fileName,
@@ -92,26 +79,69 @@ export class CotizacionesService {
         });
 
         // LÓGICA DE INTEGRACIÓN FINANCIERA (CAJA) - Se ejecuta si hay hitos COBRADOS
+        let saldoYaIngresado = 0;
+        if (result.cotizacionPadreId) {
+          const chainIds = await this.getVersionChainIds(result.cotizacionPadreId);
+          const [transacciones, facturas] = await Promise.all([
+            tx.transaccionCaja.findMany({
+              where: {
+                referenciaTipo: 'COTIZACION',
+                referenciaId: { in: chainIds }
+              }
+            }),
+            tx.factura.findMany({
+              where: { cotizacionId: { in: chainIds } },
+              include: { pagos: true }
+            })
+          ]);
+
+          for (const t of transacciones) {
+            if (t.tipo === 'INGRESO') saldoYaIngresado += Number(t.monto);
+            if (t.tipo === 'EGRESO') saldoYaIngresado -= Number(t.monto);
+          }
+          for (const f of facturas) {
+            for (const p of f.pagos) {
+              saldoYaIngresado += Number(p.monto);
+            }
+          }
+        }
+
         const montoObjetivo = result.hitosPago
           .filter((h: any) => h.estado === 'COBRADO')
           .reduce((sum: number, h: any) => sum + Number(h.monto), 0);
 
-        if (montoObjetivo > 0) {
+        const diferencia = Number((montoObjetivo - saldoYaIngresado).toFixed(2));
+
+        if (diferencia !== 0) {
           if (!cajaId) {
             throw new BadRequestException('Debe seleccionar una caja de destino para registrar el cobro de los hitos.');
           }
 
-          const conceptoText = `Cobro Inicial Cotización: ${result.codigo} | Monto Cobrado: S/ ${montoObjetivo} | Cliente: ${result.cliente?.empresa}`;
+          const conceptoText = result.cotizacionPadreId 
+            ? `Ajuste por Revisión: ${result.codigo} (Hereda de anterior) | Cliente: ${result.cliente?.empresa} | Diferencia: S/ ${diferencia}`
+            : `Cobro Inicial Cotización: ${result.codigo} | Cliente: ${result.cliente?.empresa} | Monto Cobrado: S/ ${montoObjetivo}`;
 
-          await this.finanzasService.sincronizarSaldoIngreso(
-            tx,
-            montoObjetivo,
-            cajaId,
-            conceptoText,
-            'COTIZACION',
-            result.id,
-            'SISTEMA'
-          );
+          if (diferencia > 0) {
+            await this.finanzasService.sincronizarSaldoIngreso(
+              tx,
+              diferencia,
+              cajaId,
+              conceptoText,
+              'COTIZACION',
+              result.id,
+              'SISTEMA'
+            );
+          } else {
+            await this.finanzasService.sincronizarSaldoEgreso(
+              tx,
+              Math.abs(diferencia),
+              cajaId,
+              conceptoText,
+              'COTIZACION',
+              result.id,
+              'SISTEMA'
+            );
+          }
         }
 
         return result;
@@ -154,6 +184,40 @@ export class CotizacionesService {
           (error.message || 'Datos inválidos'),
       );
     }
+  }
+
+  private async getVersionChainIds(id: string): Promise<string[]> {
+    const ids = [id];
+    let currentId = id;
+    
+    // Buscar hacia arriba (padres)
+    while (currentId) {
+      const q = await this.prisma.cotizacion.findUnique({
+        where: { id: currentId },
+        select: { cotizacionPadreId: true }
+      });
+      if (q?.cotizacionPadreId) {
+        ids.push(q.cotizacionPadreId);
+        currentId = q.cotizacionPadreId;
+      } else {
+        break;
+      }
+    }
+    
+    // Buscar hacia abajo (revisiones)
+    const findChildren = async (parentId: string) => {
+      const children = await this.prisma.cotizacion.findMany({
+        where: { cotizacionPadreId: parentId },
+        select: { id: true }
+      });
+      for (const child of children) {
+        ids.push(child.id);
+        await findChildren(child.id);
+      }
+    };
+    
+    await findChildren(id);
+    return [...new Set(ids)]; // Eliminar duplicados
   }
 
   async update(id: string, dto: any, user?: any) {
@@ -227,46 +291,72 @@ export class CotizacionesService {
       });
 
       // LÓGICA DE INTEGRACIÓN FINANCIERA (CAJA)
-      // Se sincroniza siempre que haya hitos COBRADOS o esté aprobada
+      // Solo se activa si la diferencia de dinero cobrado cambia
       
-      // Calcular cuánto ya se ingresó considerando ingresos y egresos
-      const transacciones = await tx.transaccionCaja.findMany({
-        where: {
-          referenciaTipo: 'COTIZACION',
-          referenciaId: id
-        }
-      });
+      // 1. Obtener historial de lo ya ingresado a caja por esta cotización y sus versiones anteriores
+      const chainIds = await this.getVersionChainIds(result.id);
+      
+      const [transacciones, facturas] = await Promise.all([
+        tx.transaccionCaja.findMany({
+          where: {
+            referenciaTipo: 'COTIZACION',
+            referenciaId: { in: chainIds }
+          }
+        }),
+        tx.factura.findMany({
+          where: { cotizacionId: { in: chainIds } },
+          include: { pagos: true }
+        })
+      ]);
 
       let saldoIngresado = 0;
+      // Sumar transacciones directas de caja (adelantos sin factura)
       for (const t of transacciones) {
         if (t.tipo === 'INGRESO') saldoIngresado += Number(t.monto);
         if (t.tipo === 'EGRESO') saldoIngresado -= Number(t.monto);
       }
 
-      // El monto a sincronizar depende de los hitos cobrados
+      // Sumar pagos recibidos por facturas vinculadas a esta cadena de cotizaciones
+      for (const f of facturas) {
+        for (const p of f.pagos) {
+          saldoIngresado += Number(p.monto);
+        }
+      }
+
+      // 2. Calcular el nuevo monto objetivo basado solo en hitos COBRADOS
+      // NOTA: Ignoramos explícitamente 'REPORTE_PAGO' porque es un estado transitorio para validación de finanzas
       let montoObjetivo = 0;
       if (result.hitosPago && result.hitosPago.length > 0) {
         montoObjetivo = result.hitosPago
           .filter((h: any) => h.estado === 'COBRADO')
           .reduce((sum: number, h: any) => sum + Number(h.monto), 0);
       } else if (['Aprobado', 'Aprobada'].includes(result.estado)) {
+        // Solo si NO hay hitos, la aprobación marca el monto total como cobrado (retrocompatibilidad)
         montoObjetivo = Number(result.monto);
       }
 
-      const diferencia = montoObjetivo - saldoIngresado;
+      const diferencia = Number((montoObjetivo - saldoIngresado).toFixed(2));
 
       if (diferencia !== 0) {
         if (!cajaId) {
-          throw new BadRequestException('Debe seleccionar una caja de destino/origen para registrar el cobro o ajuste de dinero.');
+          throw new BadRequestException('Se ha detectado un cambio en los hitos cobrados. Debe seleccionar una caja de destino para procesar el ingreso de dinero.');
         }
 
         const proyectoRelacionado = await tx.proyecto.findFirst({
           where: { cotizacionOrigen: { id: result.id } }
         });
-        const nombreProyecto = proyectoRelacionado?.nombre || 'Sin proyecto asignado';
+        const nombreProyecto = proyectoRelacionado?.nombre || 'Preventa';
+        const nombreCliente = result.cliente?.empresa || 'Cliente Desconocido';
 
+        // Identificar si es un adelanto adicional para el concepto
+        const esAdelantoAdicional = hitos?.some((h: any) => 
+          h.estado === 'COBRADO' && 
+          (h.descripcion.toLowerCase().includes('adelanto') || h.descripcion.toLowerCase().includes('adicional'))
+        );
+
+        const tipoMovimiento = esAdelantoAdicional ? 'Adelanto Adicional' : 'Ajuste Hitos';
         const signo = diferencia > 0 ? '+' : '-';
-        const conceptoText = `Ajuste Cotización: ${result.codigo} | Cobrado anterior: S/ ${saldoIngresado} | Nuevo Cobrado: S/ ${montoObjetivo} | Ajuste: ${signo}S/ ${Math.abs(diferencia)} | Proyecto: ${nombreProyecto}`;
+        const conceptoText = `${tipoMovimiento}: ${result.codigo} | Cliente: ${nombreCliente} | Proyecto: ${nombreProyecto} | Ajuste: ${signo}S/ ${Math.abs(diferencia)}`;
 
         if (diferencia > 0) {
           await this.finanzasService.sincronizarSaldoIngreso(
@@ -279,6 +369,7 @@ export class CotizacionesService {
             user?.id || 'SISTEMA'
           );
         } else {
+          // Si el usuario reduce el monto cobrado (ej: desmarca un hito), se genera un egreso de ajuste
           await this.finanzasService.sincronizarSaldoEgreso(
             tx,
             Math.abs(diferencia),

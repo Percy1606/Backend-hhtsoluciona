@@ -292,6 +292,44 @@ export class FinanzasController {
     return this.finanzasService.createRendicion(dto, usuarioId);
   }
 
+  @Post('rendiciones/:id/secure-delete')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas', 'operaciones')
+  async secureRemoveRendicion(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body('password') password: string,
+  ) {
+    const isValid = await this.authService.verifyAdminPassword(
+      password,
+      req.user.id,
+    );
+    if (!isValid)
+      throw new BadRequestException(
+        'La contraseña de administrador es incorrecta.',
+      );
+    return this.finanzasService.secureDeleteRendicion(id);
+  }
+
+  @Post('pagos/:id/secure-delete')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  async secureRemovePago(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body('password') password: string,
+  ) {
+    const isValid = await this.authService.verifyAdminPassword(
+      password,
+      req.user.id,
+    );
+    if (!isValid)
+      throw new BadRequestException(
+        'La contraseña de administrador es incorrecta.',
+      );
+    return this.finanzasService.secureDeletePago(id);
+  }
+
   // ============================================
   // ADELANTOS
   // ============================================

@@ -5,6 +5,8 @@ import { Injectable } from '@nestjs/common';
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor() {
+    const secret = process.env.JWT_SECRET || 'software-hh-secret-key-2026';
+    console.log('[JwtStrategy] Inicializando con secret:', secret ? '***DEFINIDO***' : '---UNDEFINED---');
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
         ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -17,7 +19,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         },
       ]),
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET!,
+      secretOrKey: secret,
     });
   }
 

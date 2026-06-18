@@ -1025,9 +1025,14 @@ export class FinanzasService {
         }
         dataToUpdate.aprobadorFinanzasId = usuarioId;
         dataToUpdate.nivelAprobacion = 'APROBADO';
-        
-        // Si por alguna razón el estado no fuera PENDIENTE, lo forzamos y bloqueamos fondos
-        if (gasto.estado !== 'PENDIENTE' && gasto.estado !== 'PAGADO') {
+
+        // Si es una solicitud, pasa a APROBADO (Fondos bloqueados/reservados)
+        if (gasto.estado === 'SOLICITADO') {
+          dataToUpdate.estado = 'APROBADO';
+          needsBlocking = true;
+        } 
+        // Si por alguna razón el estado no fuera PENDIENTE ni APROBADO ni PAGADO, lo forzamos a PENDIENTE
+        else if (gasto.estado !== 'PENDIENTE' && gasto.estado !== 'APROBADO' && gasto.estado !== 'PAGADO') {
           dataToUpdate.estado = 'PENDIENTE';
           needsBlocking = true;
         }
@@ -1154,6 +1159,138 @@ export class FinanzasService {
 
       return rendicion;
     });
+  }
+
+  async deleteRendicion(id: string) {
+    const rendicion = await this.prisma.rendicion.findUnique({
+      where: { id },
+      include: { gasto: true },
+    });
+
+    if (!rendicion) throw new NotFoundException('Rendición no encontrada');
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      // 1. Calcular nuevo monto rendido
+      const nuevoMontoRendido =
+        Number(rendicion.gasto.montoRendido || 0) - Number(rendicion.monto);
+      
+      let nuevoEstadoRendicion: EstadoRendicion = 'PENDIENTE';
+      const montoTotalGasto = Number(rendicion.gasto.montoTotal);
+
+      if (nuevoMontoRendido >= montoTotalGasto) {
+        nuevoEstadoRendicion =
+          nuevoMontoRendido > montoTotalGasto ? 'EXCEDIDA' : 'COMPLETADA';
+      } else if (nuevoMontoRendido > 0) {
+        nuevoEstadoRendicion = 'PENDIENTE';
+      } else {
+        nuevoEstadoRendicion = 'PENDIENTE';
+      }
+
+      // 2. Actualizar gasto
+      await tx.gasto.update({
+        where: { id: rendicion.gastoId },
+        data: {
+          montoRendido: nuevoMontoRendido,
+          estadoRendicion: nuevoEstadoRendicion,
+        },
+      });
+
+      // 3. Eliminar rendición
+      return tx.rendicion.delete({
+        where: { id },
+      });
+    });
+
+    // 4. Borrar archivo físico si existe
+    if (rendicion.comprobanteUrl) {
+      await deletePhysicalFiles([rendicion.comprobanteUrl]);
+    }
+
+    return result;
+  }
+
+  async secureDeleteRendicion(id: string) {
+    return this.deleteRendicion(id);
+  }
+
+  async deletePago(id: string) {
+    const pago = await this.prisma.pago.findUnique({
+      where: { id },
+      include: { factura: true, gasto: true },
+    });
+
+    if (!pago) throw new NotFoundException('Pago no encontrado');
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      // 1. Revertir saldo en caja
+      const dbCaja = await tx.caja.findUnique({ where: { id: pago.cajaId } });
+      if (dbCaja) {
+        const nuevoReal = Number(dbCaja.saldoReal) - Number(pago.monto);
+        await tx.caja.update({
+          where: { id: pago.cajaId },
+          data: {
+            saldoReal: nuevoReal,
+            saldoDisponible: nuevoReal - Number(dbCaja.saldoComprometido),
+          },
+        });
+
+        // Auditoría de reversión
+        await tx.transaccionCaja.create({
+          data: {
+            cajaId: pago.cajaId,
+            tipo: 'EGRESO',
+            monto: Number(pago.monto),
+            concepto: `ELIMINACIÓN PAGO: ${pago.factura?.codigo || pago.gasto?.codigo || 'S/N'}`,
+            referenciaTipo: pago.facturaId ? 'FACTURA' : 'GASTO',
+            referenciaId: pago.facturaId || pago.gastoId,
+            usuarioId: 'system',
+            saldoRealPrevio: Number(dbCaja.saldoReal),
+            saldoRealNuevo: nuevoReal,
+          } as any,
+        });
+      }
+
+      // 2. Revertir saldo en factura o gasto
+      if (pago.facturaId) {
+        const f = await tx.factura.findUnique({ where: { id: pago.facturaId } });
+        if (f) {
+          const nuevoSaldo = Number(f.saldoPendiente) + Number(pago.monto);
+          await tx.factura.update({
+            where: { id: pago.facturaId },
+            data: {
+              saldoPendiente: nuevoSaldo,
+              estado: nuevoSaldo >= Number(f.montoTotal) ? 'PENDIENTE' : 'PAGO_PARCIAL',
+            },
+          });
+        }
+      } else if (pago.gastoId) {
+        const g = await tx.gasto.findUnique({ where: { id: pago.gastoId } });
+        if (g) {
+          const nuevoSaldo = Number(g.saldoPendiente) + Number(pago.monto);
+          await tx.gasto.update({
+            where: { id: pago.gastoId },
+            data: {
+              saldoPendiente: nuevoSaldo,
+              estado: 'PENDIENTE',
+            },
+          });
+        }
+      }
+
+      // 3. Eliminar pago
+      return tx.pago.delete({ where: { id } });
+    });
+
+    // 4. Borrar archivo físico si existe
+    if (pago.comprobanteUrl) {
+      await deletePhysicalFiles([pago.comprobanteUrl]);
+    }
+
+    return result;
+  }
+
+  async secureDeletePago(id: string) {
+    return this.deletePago(id);
   }
 
   // ============================================

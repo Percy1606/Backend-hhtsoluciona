@@ -256,7 +256,7 @@ export class LogisticaService {
           concepto: `Orden de Compra: ${orden.codigo} ${dto.observaciones ? '- ' + dto.observaciones : ''}`,
           montoTotal: montoTotal,
           saldoPendiente: montoTotal,
-          estado: EstadoGasto.PENDIENTE,
+          estado: EstadoGasto.SOLICITADO,
           nivelAprobacion: 'PENDIENTE_FINANZAS',
           solicitanteId: userId,
           area: 'LogisticaYRecursos',
