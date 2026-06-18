@@ -645,7 +645,7 @@ export class FinanzasService {
     return this.prisma.factura.update({ where: { id }, data });
   }
 
-  async deleteFactura(id: string) {
+  async deleteFactura(id: string, motivo?: string) {
     console.log(`[ANULACIÓN] Iniciando proceso para factura ID: ${id}`);
 
     const factura = await this.prisma.factura.findUnique({
@@ -685,7 +685,7 @@ export class FinanzasService {
               cajaId: pago.cajaId,
               tipo: 'EGRESO' as any,
               monto: Number(pago.monto),
-              concepto: `ANULACIÓN Factura: ${factura.codigo}`,
+              concepto: `ANULACIÓN Factura: ${factura.codigo}${motivo ? ` - MOTIVO: ${motivo}` : ''}`,
               referenciaTipo: 'FACTURA',
               referenciaId: id,
               usuarioId: 'system',
@@ -1061,7 +1061,7 @@ export class FinanzasService {
     });
   }
 
-  async deleteGasto(id: string, usuarioId?: string) {
+  async deleteGasto(id: string, usuarioId?: string, motivo?: string) {
     const gasto = await this.prisma.gasto.findUnique({
       where: { id },
       include: { pagos: true },
@@ -1077,10 +1077,38 @@ export class FinanzasService {
       .filter(Boolean);
 
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. ELIMINAR LOS REGISTROS DE PAGO
+      // 1. REVERTIR SALDO EN CAJA por cada pago vinculado al gasto
+      for (const pago of gasto.pagos) {
+        const dbCaja = await tx.caja.findUnique({ where: { id: pago.cajaId } });
+        if (dbCaja) {
+          const nuevoReal = Number(dbCaja.saldoReal) + Number(pago.monto); // Es un gasto, sumamos al revertir
+          await tx.caja.update({
+            where: { id: pago.cajaId },
+            data: {
+              saldoReal: nuevoReal,
+              saldoDisponible: nuevoReal - Number(dbCaja.saldoComprometido),
+            },
+          });
+          await tx.transaccionCaja.create({
+            data: {
+              cajaId: pago.cajaId,
+              tipo: 'INGRESO' as any, // Reversión de egreso es ingreso
+              monto: Number(pago.monto),
+              concepto: `ANULACIÓN Gasto: ${gasto.codigo}${motivo ? ` - MOTIVO: ${motivo}` : ''}`,
+              referenciaTipo: 'GASTO',
+              referenciaId: id,
+              usuarioId: usuarioId || 'system',
+              saldoRealPrevio: Number(dbCaja.saldoReal),
+              saldoRealNuevo: nuevoReal,
+            } as any,
+          });
+        }
+      }
+
+      // 2. ELIMINAR LOS REGISTROS DE PAGO
       await tx.pago.deleteMany({ where: { gastoId: id } });
 
-      // 2. MARCAR COMO ANULADO
+      // 3. MARCAR COMO ANULADO
       return tx.gasto.update({
         where: { id },
         data: {

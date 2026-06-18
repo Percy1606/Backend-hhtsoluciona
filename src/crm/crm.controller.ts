@@ -96,27 +96,6 @@ export class CrmController {
     return { count: results.length, data: results };
   }
 
-  @Post('clientes/:id/secure-delete')
-  @UseGuards(ModulesGuard)
-  @Modules('crm')
-  async secureRemove(
-    @Req() req: any,
-    @Param('id') id: string,
-    @Body('password') password: string,
-  ) {
-    console.log(`[CRM] Intento de eliminación segura para cliente: ${id}`);
-    const isValid = await this.authService.verifyAdminPassword(
-      password,
-      req.user.id,
-    );
-    if (!isValid) {
-      throw new BadRequestException(
-        'La contraseña de administrador es incorrecta.',
-      );
-    }
-    return this.crmService.removeCliente(id, req.user);
-  }
-
   @Post('clientes')
   @UseGuards(ModulesGuard)
   @Modules('crm')
@@ -139,10 +118,7 @@ export class CrmController {
   @UseGuards(ModulesGuard)
   @Modules('crm')
   remove(@Req() req: any, @Param('id') id: string) {
-    // DESHABILITADO: Se requiere usar /secure-delete con contraseña
-    throw new BadRequestException(
-      'La eliminación directa está deshabilitada por seguridad. Use el borrado seguro con contraseña.',
-    );
+    return this.crmService.removeCliente(id, req.user);
   }
 
   @Post('interacciones')

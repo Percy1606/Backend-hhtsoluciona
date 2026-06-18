@@ -112,26 +112,6 @@ export class CotizacionesController {
     return this.cotizacionesService.remove(id);
   }
 
-  @Post(':id/secure-delete')
-  @UseGuards(ModulesGuard)
-  @Modules('crm')
-  async secureRemove(
-    @Req() req: any,
-    @Param('id') id: string,
-    @Body('password') password: string,
-  ) {
-    const isValid = await this.authService.verifyAdminPassword(
-      password,
-      req.user.id,
-    );
-    if (!isValid) {
-      throw new BadRequestException(
-        'La contraseña de administrador es incorrecta.',
-      );
-    }
-    return this.cotizacionesService.remove(id);
-  }
-
   @Get(':id/word')
   async generateWord(@Param('id') id: string, @Res() res: express.Response) {
     try {
