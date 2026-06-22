@@ -1483,8 +1483,10 @@ export class OperacionesService {
         where: { fichaTecnicaId: id },
       });
 
-      // 2. Borrar físicamente los archivos antiguos
-      await deletePhysicalFiles(oldUrls);
+      // 2. Borrar físicamente los archivos antiguos que ya no se usan
+      const newUrls = adjuntos.map((a: any) => a.url).filter(Boolean);
+      const urlsToDelete = oldUrls.filter((url) => !newUrls.includes(url));
+      await deletePhysicalFiles(urlsToDelete);
 
       data.adjuntos = {
         create: adjuntos.map((a: any) => ({
