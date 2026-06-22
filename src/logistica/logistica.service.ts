@@ -210,13 +210,11 @@ export class LogisticaService {
       );
     }
 
-    // BUSCAR CAJA PARA VINCULAR (Prioridad: Principal o Soles)
-    let caja = await this.prisma.caja.findFirst({
-      where: { OR: [{ nombre: { contains: 'Principal' } }, { moneda: 'PEN' }] }
-    });
-    
-    if (!caja) {
-      caja = await this.prisma.caja.findFirst();
+    // NO BUSCAMOS CAJA AQUÍ. LOGÍSTICA NO DEBE BLOQUEAR FONDOS A CIEGAS.
+    // SE CREA EL GASTO EN ESTADO SOLICITADO PARA QUE FINANZAS ASIGNE LA CAJA Y EJECUTE EL PAGO/BLOQUEO.
+
+    if (dto.proyectoId && dto.proyectoId !== 'none' && dto.proyectoId !== '') {
+      await this.validarReglasFinancieras(dto.proyectoId, montoTotal);
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -225,6 +223,8 @@ export class LogisticaService {
           codigo: codigoToSave,
           proveedorId: dto.proveedorId,
           observaciones: dto.observaciones,
+          estado: (dto.estado as EstadoCompra) || EstadoCompra.PENDIENTE,
+          archivoFactura: dto.archivoFactura,
           montoTotal: montoTotal,
           usuarioId: userId,
           items: {
@@ -242,14 +242,14 @@ export class LogisticaService {
         include: { items: { include: { insumo: true } }, proveedor: true },
       });
 
-      // 1. CREAR EL GASTO VINCULADO PARA QUE FINANZAS LO APRUEBE
+      // 1. CREAR EL GASTO VINCULADO PARA QUE FINANZAS LO GESTIONE Y PAGUE
       const gasto = await tx.gasto.create({
         data: {
           codigo: `OC-${orden.codigo}`,
           proveedorId: orden.proveedorId,
           proyectoId: dto.proyectoId || null,
           ordenCompraId: orden.id,
-          cajaId: caja?.id || null,
+          cajaId: null, // Finanzas decidirá de qué caja sale el dinero
           tipo: TipoGasto.PROYECTO,
           clasificacion: ClasificacionFinanciera.PROYECTO,
           categoriaDistribucion: CategoriaDistribucion.MATERIALES,
@@ -265,33 +265,7 @@ export class LogisticaService {
         } as any,
       });
 
-      // 2. BLOQUEAR FONDOS AUTOMÁTICAMENTE AL CREAR (PASA A COMPROMETIDO)
-      if (caja) {
-        const nuevoComprometido = Number(caja.saldoComprometido) + montoTotal;
-        const nuevoDisponible = Number(caja.saldoReal) - nuevoComprometido;
-
-        await tx.caja.update({
-          where: { id: caja.id },
-          data: {
-            saldoComprometido: nuevoComprometido,
-            saldoDisponible: nuevoDisponible,
-          },
-        });
-
-        await tx.transaccionCaja.create({
-          data: {
-            cajaId: caja.id,
-            tipo: 'BLOQUEO',
-            monto: montoTotal,
-            concepto: `Fondos comprometidos por OC: ${orden.codigo}`,
-            referenciaTipo: 'ORDEN_COMPRA',
-            referenciaId: orden.id,
-            usuarioId: userId,
-            saldoRealPrevio: Number(caja.saldoReal),
-            saldoRealNuevo: Number(caja.saldoReal),
-          } as any,
-        });
-      }
+      // 2. YA NO HAY BLOQUEO AUTOMÁTICO DE FONDOS. FINANZAS SE ENCARGARÁ.
 
 
       return orden;
@@ -415,14 +389,21 @@ export class LogisticaService {
       return sum + item.cantidad * item.precioUnitario;
     }, 0);
 
-    return this.prisma.ordenCompra.update({
-      where: { id },
-      data: {
-        codigo: dto.codigo,
-        proveedorId: dto.proveedorId,
-        observaciones: dto.observaciones,
-        montoTotal,
-        items: {
+    const gastoVinculado = await this.prisma.gasto.findFirst({ where: { ordenCompraId: id } });
+    if (gastoVinculado && gastoVinculado.proyectoId) {
+      await this.validarReglasFinancieras(gastoVinculado.proyectoId, montoTotal, gastoVinculado.id);
+    }
+
+      return this.prisma.ordenCompra.update({
+        where: { id },
+        data: {
+          codigo: dto.codigo,
+          proveedorId: dto.proveedorId,
+          observaciones: dto.observaciones,
+          estado: dto.estado ? (dto.estado as EstadoCompra) : undefined,
+          archivoFactura: dto.archivoFactura !== undefined ? dto.archivoFactura : undefined,
+          montoTotal,
+          items: {
           deleteMany: {},
           create: dto.items.map((item: any) => ({
             insumoId: item.insumoId,
@@ -469,41 +450,25 @@ export class LogisticaService {
 
     if (!orden) throw new NotFoundException('Orden de compra no encontrada');
 
-    // SI SE CANCELA UNA ORDEN, LIBERAMOS LOS FONDOS COMPROMETIDOS
+    // SI SE CANCELA UNA ORDEN, ANULAMOS EL GASTO ASOCIADO PARA QUE FINANZAS NO LO PAGUE
     if (
       nuevoEstado === EstadoCompra.CANCELADO &&
       orden.estado !== EstadoCompra.CANCELADO
     ) {
-      const caja = await this.prisma.caja.findFirst();
-      if (caja) {
-        await this.prisma.$transaction(async (tx) => {
-          const montoOC = Number(orden.montoTotal);
-          const nuevoComprometido = Math.max(
-            0,
-            Number(caja.saldoComprometido) - montoOC,
-          );
-          await tx.caja.update({
-            where: { id: caja.id },
-            data: {
-              saldoComprometido: nuevoComprometido,
-              saldoDisponible: Number(caja.saldoReal) - nuevoComprometido,
-            },
-          });
-          await tx.transaccionCaja.create({
-            data: {
-              cajaId: caja.id,
-              tipo: 'LIBERACION' as any,
-              monto: montoOC,
-              concepto: `Fondos liberados por cancelación de OC: ${orden.codigo}`,
-              referenciaTipo: 'ORDEN_COMPRA',
-              referenciaId: orden.id,
-              usuarioId: userId,
-              saldoRealPrevio: Number(caja.saldoReal),
-              saldoRealNuevo: Number(caja.saldoReal),
-            } as any,
-          });
-        });
+      const gastoRelacionado = await this.prisma.gasto.findFirst({ where: { ordenCompraId: orden.id } });
+      if (gastoRelacionado && gastoRelacionado.estado === 'PAGADO') {
+        throw new BadRequestException('No puedes cancelar esta OC porque Finanzas ya ejecutó el pago. Coordine con Finanzas la anulación del gasto primero.');
       }
+
+      await this.prisma.$transaction(async (tx) => {
+        // Actualizamos estado del gasto a ANULADO
+        if (gastoRelacionado) {
+           await tx.gasto.update({
+             where: { id: gastoRelacionado.id },
+             data: { estado: 'ANULADO' }
+           });
+        }
+      });
     }
 
     if (orden.estado === EstadoCompra.RECIBIDO)
@@ -628,5 +593,152 @@ export class LogisticaService {
       include: { insumo: true },
       orderBy: { fecha: 'desc' },
     });
+  }
+
+  // ============================================
+  // BANDEJA LOGÍSTICA (Fase 3)
+  // ============================================
+
+  async getProyectosPendientesLogistica() {
+    return this.prisma.proyecto.findMany({
+      where: {
+        autorizaCompras: true,
+        estado: { not: 'Finalizado' },
+        cotizacionOrigen: { isNot: null },
+      },
+      select: {
+        id: true,
+        codigo: true,
+        nombre: true,
+        estado: true,
+        estadoFinanciero: true,
+        autorizaCompras: true,
+        estadoLogistica: true,
+        ventaContratada: true,
+        costoPresupuestado: true,
+        fechaCreacion: true,
+        cliente: { select: { id: true, empresa: true, ruc: true } },
+        cotizacionOrigen: {
+          select: {
+            id: true,
+            codigo: true,
+            alcance: true,
+            entregables: true,
+            ordenesDeServicio: {
+              select: { id: true, codigo: true, estado: true },
+            },
+          },
+        },
+        adelantos: {
+          select: { monto: true, saldoDisponible: true },
+        },
+      },
+      orderBy: { fechaCreacion: 'desc' },
+    });
+  }
+
+  async updateEstadoLogistica(
+    proyectoId: string,
+    estadoLogistica: string,
+  ) {
+    const proyecto = await this.prisma.proyecto.findUnique({
+      where: { id: proyectoId },
+    });
+    if (!proyecto) throw new NotFoundException('Proyecto no encontrado.');
+
+    if (!proyecto.autorizaCompras) {
+      throw new BadRequestException(
+        'Este proyecto no tiene autorización de compras activa. Coordine con Finanzas primero.',
+      );
+    }
+
+    const estadosValidos = [
+      'PendienteRevision',
+      'EnRevision',
+      'Aprobado',
+      'Observado',
+    ];
+    if (!estadosValidos.includes(estadoLogistica)) {
+      throw new BadRequestException(
+        `Estado logístico inválido. Use: ${estadosValidos.join(', ')}`,
+      );
+    }
+
+    return this.prisma.proyecto.update({
+      where: { id: proyectoId },
+      data: { estadoLogistica },
+    });
+  }
+
+  // ============================================
+  // REGLAS FINANCIERAS Y PRESUPUESTO
+  // ============================================
+
+  async getPresupuestoProyecto(proyectoId: string) {
+    const proyecto = await this.prisma.proyecto.findUnique({
+      where: { id: proyectoId },
+    });
+    if (!proyecto) throw new NotFoundException('Proyecto no encontrado');
+
+    const costoPresupuestado = Number(proyecto.costoPresupuestado);
+
+    const gastos = await this.prisma.gasto.findMany({
+      where: {
+        proyectoId,
+        estado: { in: ['SOLICITADO', 'PENDIENTE', 'APROBADO', 'PAGADO'] },
+      },
+    });
+
+    let montoComprometido = 0;
+    let montoEjecutado = 0;
+
+    for (const g of gastos) {
+      if (g.estado === 'PAGADO') {
+        montoEjecutado += Number(g.montoTotal);
+      } else {
+        montoComprometido += Number(g.montoTotal);
+      }
+    }
+
+    const totalConsumido = montoComprometido + montoEjecutado;
+    const saldoDisponible = costoPresupuestado - totalConsumido;
+    const porcentajeConsumido = costoPresupuestado > 0 ? (totalConsumido / costoPresupuestado) * 100 : 0;
+
+    return {
+      presupuestoTotal: costoPresupuestado,
+      montoComprometido,
+      montoEjecutado,
+      saldoDisponible,
+      porcentajeConsumido,
+      autorizaCompras: proyecto.autorizaCompras
+    };
+  }
+
+  async validarReglasFinancieras(proyectoId: string, montoNuevaOrden: number, excludeGastoId?: string) {
+    const proyecto = await this.prisma.proyecto.findUnique({
+      where: { id: proyectoId },
+    });
+    if (!proyecto) return;
+
+    if (!proyecto.autorizaCompras) {
+      throw new BadRequestException('Las compras se encuentran bloqueadas por el área financiera para este proyecto.');
+    }
+
+    const costoPresupuestado = Number(proyecto.costoPresupuestado);
+    
+    const gastos = await this.prisma.gasto.findMany({
+      where: {
+        proyectoId,
+        estado: { in: ['SOLICITADO', 'PENDIENTE', 'APROBADO', 'PAGADO'] },
+        id: excludeGastoId ? { not: excludeGastoId } : undefined
+      },
+    });
+
+    const totalConsumido = gastos.reduce((acc, g) => acc + Number(g.montoTotal), 0);
+    const saldoDisponible = costoPresupuestado - totalConsumido;
+
+    if (montoNuevaOrden > saldoDisponible) {
+      throw new BadRequestException(`No existe saldo suficiente para aprobar esta compra. La orden excede el presupuesto disponible del proyecto en S/ ${(montoNuevaOrden - saldoDisponible).toFixed(2)}. \n\nPresupuesto: S/ ${costoPresupuestado.toFixed(2)} \nComprometido/Ejecutado: S/ ${totalConsumido.toFixed(2)} \nSaldo Disponible: S/ ${saldoDisponible.toFixed(2)} \nNueva Compra: S/ ${montoNuevaOrden.toFixed(2)}`);
+    }
   }
 }

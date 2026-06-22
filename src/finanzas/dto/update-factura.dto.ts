@@ -89,4 +89,8 @@ export class UpdateFacturaDto {
   @IsDateString()
   @IsOptional()
   proximaFacturacion?: string;
+
+  @IsUUID()
+  @IsOptional()
+  hitoPagoId?: string | null;
 }

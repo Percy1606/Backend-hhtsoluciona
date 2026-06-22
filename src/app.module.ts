@@ -23,7 +23,7 @@ import { FilesModule } from './files/files.module';
     ThrottlerModule.forRoot([
       {
         ttl: 60000,
-        limit: 10,
+        limit: 100, // Aumentado para no bloquear dashboards que hacen múltiples peticiones
       },
     ]),
     AuthModule,

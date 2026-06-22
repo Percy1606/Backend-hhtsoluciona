@@ -429,6 +429,7 @@ model Cotizacion {
   interacciones     Interaccion[]
   facturas          Factura[]    @relation("CotizacionFacturas")
   hitosPago         HitoPago[]
+  ordenesDeServicio OrdenDeServicio[]
   
   proyectoGeneradoId String?     @unique(map: "COTIZACION_proyectoGeneradoId_key")
   proyectoGenerado   Proyecto?   @relation("CotizacionProyecto", fields: [proyectoGeneradoId], references: [id])
@@ -537,6 +538,12 @@ model Proyecto {
 
   historialCambios         HistorialCambio[]    @relation("ProyectoHistorialCambios")
   indicadoresAvance        IndicadorAvance[]
+  ordenesDeServicio        OrdenDeServicio[]
+
+  // Campos para el flujo comercial → finanzas → logística
+  estadoFinanciero         String?              @default("SinPago")
+  autorizaCompras          Boolean              @default(false)
+  estadoLogistica          String?              @default("PendienteRevision")
 
   creadoPor                String?
   fechaCreacion            DateTime             @default(now())
@@ -742,11 +749,13 @@ model Documento {
   fechaVencimiento      DateTime?
   observaciones         String?          @db.Text
   esEntregable          Boolean?         @default(false)
+  area                  Area? // Nuevo campo para categorizar documentos por área responsable
 
   @@index([clientId], map: "Documento_clientId_fkey")
   @@index([cotizacionId], map: "Documento_cotizacionId_fkey")
   @@index([proyectoId], map: "Documento_proyectoId_fkey")
   @@index([expedienteTecnicoId], map: "documento_expedienteTecnicoId_fkey")
+  @@index([area])
   @@map("documento")
 }
 
@@ -1215,4 +1224,28 @@ model Rendicion {
 
   @@index([gastoId])
   @@map("rendicion")
+}
+
+// ============================================
+// ORDEN DE SERVICIO (nuevo — Fase 1)
+// ============================================
+
+model OrdenDeServicio {
+  id             String      @id @default(uuid())
+  codigo         String      @unique
+  cotizacionId   String
+  cotizacion     Cotizacion  @relation(fields: [cotizacionId], references: [id])
+  proyectoId     String?
+  proyecto       Proyecto?   @relation(fields: [proyectoId], references: [id])
+  fechaEmision   DateTime    @default(now())
+  estado         String      @default("Activo")
+  terminos       String?     @db.Text
+  observaciones  String?     @db.Text
+  archivoUrl     String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([cotizacionId], map: "orden_de_servicio_cotizacionId_fkey")
+  @@index([proyectoId], map: "orden_de_servicio_proyectoId_fkey")
+  @@map("orden_de_servicio")
 }

@@ -174,7 +174,7 @@ export class CrmController {
           cb(null, `${uniqueSuffix}${extname(file.originalname)}`);
         },
       }),
-      limits: { fileSize: 15 * 1024 * 1024 }, // 15MB limit
+      limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
     }),
   )
   async uploadFile(@UploadedFile() file: any) {

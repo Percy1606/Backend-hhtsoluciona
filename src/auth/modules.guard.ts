@@ -59,11 +59,9 @@ export class ModulesGuard implements CanActivate {
       String(moduleIdMapping(m)).toLowerCase(),
     );
 
-    // Verificación de acceso: ¿Tiene el usuario alguno de los módulos requeridos?
-    const hasAccess = requiredMapped.some(
-      (reqMod) =>
-        finalModules.includes(reqMod) ||
-        finalModules.some((userMod) => userMod.includes(reqMod)),
+    // Verificación de acceso: ¿Tiene el usuario ALGUNO de los módulos requeridos de forma EXACTA?
+    const hasAccess = requiredMapped.some((reqMod) =>
+      finalModules.includes(reqMod)
     );
 
     if (!hasAccess) {

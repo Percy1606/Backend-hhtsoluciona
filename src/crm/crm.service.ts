@@ -219,6 +219,15 @@ export class CrmService {
         });
       }
 
+      if (esClienteReal) {
+        await this.notificacionesService.create({
+          titulo: `🎉 ¡VENTA CERRADA! - ${cliente.empresa}`,
+          mensaje: `Se ha registrado una nueva venta ganada con el cliente ${cliente.empresa}. ¡Felicidades!`,
+          tipo: 'CLIENTE',
+          esGlobal: true,
+        });
+      }
+
       return cliente;
     } catch (error) {
       console.error('Error creating client:', error);
@@ -322,6 +331,19 @@ export class CrmService {
           modulo: 'CRM',
           accion: 'ACTUALIZAR_CLIENTE',
           detalles: { clienteId: id, empresa: cliente.empresa, cambios: dto },
+        });
+      }
+
+      if (
+        dto['etapaComercial'] &&
+        dto['etapaComercial'].toUpperCase() === 'GANADO' &&
+        currentCliente.etapaComercial?.toUpperCase() !== 'GANADO'
+      ) {
+        await this.notificacionesService.create({
+          titulo: `🎉 ¡VENTA CERRADA! - ${cliente.empresa}`,
+          mensaje: `Se ha cerrado la venta exitosamente con el cliente ${cliente.empresa}. ¡Felicidades!`,
+          tipo: 'CLIENTE',
+          esGlobal: true,
         });
       }
 

@@ -52,25 +52,52 @@ export class OperacionesService {
     });
   }
 
-  async createDocumento(dto: CreateDocumentoDto) {
-    const { fechaVencimiento, ...data } = dto;
-    return this.prisma.documento.create({
-      data: {
-        ...data,
-        fechaVencimiento: fechaVencimiento ? new Date(fechaVencimiento) : null,
-      } as any,
-    });
+  async createDocumento(dto: any) {
+    console.log('[Service] createDocumento - DTO Inicial:', dto);
+    const { fechaVencimiento, fechaSubida, area, validaciones, proyectoId, ...data } = dto;
+    
+    const dataToPrisma: any = {
+      ...data,
+      fechaSubida: fechaSubida ? new Date(fechaSubida) : new Date(),
+      fechaVencimiento: fechaVencimiento ? new Date(fechaVencimiento) : null,
+    };
+    
+    if (proyectoId) {
+      dataToPrisma.proyecto = { connect: { id: proyectoId } };
+    }
+    if (area) {
+      dataToPrisma.area = area;
+    }
+    
+    console.log('[Service] createDocumento - Datos enviados a Prisma:', dataToPrisma);
+
+    try {
+      return await this.prisma.documento.create({
+        data: dataToPrisma,
+      });
+    } catch (error) {
+      console.error('[Service] createDocumento - Error Prisma:', error);
+      throw error;
+    }
   }
 
   async updateDocumento(id: string, dto: any) {
+    const { proyectoId, area, ...data } = dto;
+    const dataToPrisma: any = {
+      ...data,
+      fechaVencimiento: dto.fechaVencimiento
+        ? new Date(dto.fechaVencimiento)
+        : undefined,
+    };
+    if (proyectoId) {
+      dataToPrisma.proyecto = { connect: { id: proyectoId } };
+    }
+    if (area) {
+      dataToPrisma.area = area;
+    }
     return this.prisma.documento.update({
       where: { id },
-      data: {
-        ...dto,
-        fechaVencimiento: dto.fechaVencimiento
-          ? new Date(dto.fechaVencimiento)
-          : undefined,
-      },
+      data: dataToPrisma,
     });
   }
 
@@ -87,6 +114,21 @@ export class OperacionesService {
     }
 
     return result;
+  }
+
+  async findAllDocumentos(filters: { area?: string; proyectoId?: string }) {
+    return this.prisma.documento.findMany({
+      where: {
+        area: (filters.area as any) || undefined,
+        proyectoId: filters.proyectoId || undefined,
+      } as any,
+      include: {
+        proyecto: true,
+      },
+      orderBy: {
+        fechaSubida: 'desc',
+      },
+    });
   }
 
   async createSuboperacion(data: any) {
@@ -527,6 +569,14 @@ export class OperacionesService {
           tipo: 'SISTEMA',
         });
       }
+
+      // TRIGGER: Notificación Global de Nuevo Proyecto
+      await this.notificacionesService.create({
+        titulo: `🚀 NUEVO PROYECTO: ${proyecto.codigo}`,
+        mensaje: `Se ha registrado el proyecto ${proyecto.nombre} para el cliente ${cliente.empresa}.`,
+        tipo: 'SISTEMA',
+        esGlobal: true,
+      });
 
       // NUEVA LÓGICA: Crear Adelantos automáticos si la cotización tiene hitos COBRADOS
       const hitosCobrados = await this.prisma.hitoPago.findMany({

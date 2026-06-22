@@ -211,7 +211,7 @@ export class OperacionesController {
         },
       }),
       limits: {
-        fileSize: 10 * 1024 * 1024, // 10MB limit
+        fileSize: 50 * 1024 * 1024, // 50MB limit
       },
     }),
   )
@@ -257,7 +257,9 @@ export class OperacionesController {
   // ============================================
 
   @Post('documentos')
-  async createDocumento(@Body() dto: CreateDocumentoDto) {
+  @UsePipes(new ValidationPipe({ transform: false, whitelist: false, forbidNonWhitelisted: false }))
+  async createDocumento(@Body() dto: any) {
+    console.log('[Controller] POST /operaciones/documentos - Recibido:', dto);
     return this.operacionesService.createDocumento(dto);
   }
 
@@ -270,6 +272,14 @@ export class OperacionesController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async removeDocumento(@Param('id') id: string) {
     return this.operacionesService.removeDocumento(id);
+  }
+
+  @Get('documentos')
+  async findAllDocumentos(
+    @Query('area') area?: string,
+    @Query('proyectoId') proyectoId?: string,
+  ) {
+    return this.operacionesService.findAllDocumentos({ area, proyectoId });
   }
 
   // ============================================
@@ -347,7 +357,7 @@ export class OperacionesController {
           cb(null, `${uniqueSuffix}${extname(file.originalname)}`);
         },
       }),
-      limits: { fileSize: 20 * 1024 * 1024 }, // 20MB limit
+      limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
     }),
   )
   async uploadFichaFile(@UploadedFile() file: any) {

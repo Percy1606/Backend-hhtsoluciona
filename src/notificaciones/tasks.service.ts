@@ -13,7 +13,7 @@ export class TasksService {
   ) {}
 
   // Se ejecuta todos los días a las 8:00 AM
-  @Cron(CronExpression.EVERY_DAY_AT_8AM)
+  @Cron('0 8 * * *', { timeZone: 'America/Lima' })
   async handleDailyNotifications() {
     this.logger.log(
       'Iniciando proceso diario de notificaciones automáticas...',
@@ -31,16 +31,16 @@ export class TasksService {
   // REVISIÓN DE FACTURAS POR VENCER (en 48 horas)
   private async checkExpiringInvoices() {
     const today = new Date();
-    const twoDaysFromNow = new Date();
-    twoDaysFromNow.setDate(twoDaysFromNow.getDate() + 2);
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
-    // Buscar facturas no pagadas que vencen pronto
+    // Buscar facturas no pagadas que vencen pronto (1 día)
     const expiringInvoices = await this.prisma.factura.findMany({
       where: {
         estado: { in: ['PENDIENTE', 'PAGO_PARCIAL'] },
         fechaVencimiento: {
           gte: today,
-          lte: twoDaysFromNow,
+          lte: tomorrow,
         },
       },
       include: { cliente: true },
@@ -48,12 +48,8 @@ export class TasksService {
 
     if (expiringInvoices.length === 0) return;
 
-    // Obtener usuarios que tienen el rol de ADMIN o acceso a finanzas
-    const users = await this.prisma.usuario.findMany({
-      where: {
-        OR: [{ rol: 'ADMIN' }],
-      },
-    });
+    // Obtener todos los usuarios para luego filtrarlos
+    const users = await this.prisma.usuario.findMany();
 
     const adminUsers = users.filter(
       (u) =>
@@ -79,7 +75,7 @@ export class TasksService {
           await this.notificacionesService.create({
             usuarioId: admin.id,
             titulo: 'Factura por Vencer',
-            mensaje: `La factura ${invoice.codigo} del cliente ${invoice.cliente.empresa} vence en menos de 48 horas (${new Date(invoice.fechaVencimiento).toLocaleDateString()}).`,
+            mensaje: `La factura ${invoice.codigo} del cliente ${invoice.cliente.empresa} vence mañana (${new Date(invoice.fechaVencimiento).toLocaleDateString()}).`,
             tipo: 'SISTEMA',
           });
         }

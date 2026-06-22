@@ -9,6 +9,7 @@ import { UpdateCotizacionDto } from './dto/update-cotizacion.dto';
 import { NotificacionesService } from '../notificaciones/notificaciones.service';
 import { FinanzasService } from '../finanzas/finanzas.service';
 import { deletePhysicalFiles } from '../common/utils/file-utils';
+import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class CotizacionesService {
@@ -28,6 +29,7 @@ export class CotizacionesService {
         alcance,
         cajaId,
         hitos,
+        liderId,
         ...quoteData
       } = dto;
       const codigo = await this.generateCode();
@@ -78,99 +80,80 @@ export class CotizacionesService {
           },
         });
 
-        // LÓGICA DE INTEGRACIÓN FINANCIERA (CAJA) - Se ejecuta si hay hitos COBRADOS
-        let saldoYaIngresado = 0;
-        if (result.cotizacionPadreId) {
-          const chainIds = await this.getVersionChainIds(result.cotizacionPadreId);
-          const [transacciones, facturas] = await Promise.all([
-            tx.transaccionCaja.findMany({
-              where: {
-                referenciaTipo: 'COTIZACION',
-                referenciaId: { in: chainIds }
-              }
-            }),
-            tx.factura.findMany({
-              where: { cotizacionId: { in: chainIds } },
-              include: { pagos: true }
-            })
-          ]);
-
-          for (const t of transacciones) {
-            if (t.tipo === 'INGRESO') saldoYaIngresado += Number(t.monto);
-            if (t.tipo === 'EGRESO') saldoYaIngresado -= Number(t.monto);
-          }
-          for (const f of facturas) {
-            for (const p of f.pagos) {
-              saldoYaIngresado += Number(p.monto);
-            }
-          }
-        }
-
-        const montoObjetivo = result.hitosPago
-          .filter((h: any) => h.estado === 'COBRADO')
-          .reduce((sum: number, h: any) => sum + Number(h.monto), 0);
-
-        const diferencia = Number((montoObjetivo - saldoYaIngresado).toFixed(2));
-
-        if (diferencia !== 0) {
-          if (!cajaId) {
-            throw new BadRequestException('Debe seleccionar una caja de destino para registrar el cobro de los hitos.');
-          }
-
-          const conceptoText = result.cotizacionPadreId 
-            ? `Ajuste por Revisión: ${result.codigo} (Hereda de anterior) | Cliente: ${result.cliente?.empresa} | Diferencia: S/ ${diferencia}`
-            : `Cobro Inicial Cotización: ${result.codigo} | Cliente: ${result.cliente?.empresa} | Monto Cobrado: S/ ${montoObjetivo}`;
-
-          if (diferencia > 0) {
-            await this.finanzasService.sincronizarSaldoIngreso(
-              tx,
-              diferencia,
-              cajaId,
-              conceptoText,
-              'COTIZACION',
-              result.id,
-              'SISTEMA'
-            );
-          } else {
-            await this.finanzasService.sincronizarSaldoEgreso(
-              tx,
-              Math.abs(diferencia),
-              cajaId,
-              conceptoText,
-              'COTIZACION',
-              result.id,
-              'SISTEMA'
-            );
-          }
-        }
-
         return result;
       });
 
-      // TRIGGER AUTOMÁTICO: Mover a "Cotización Enviada"
-      try {
-        await this.prisma.cliente.update({
-          where: { id: cotizacion.clientId },
-          data: {
-            etapaComercial: 'Cotización Enviada',
-            accion: 'Hacer Seguimiento',
-            ultimoContacto: new Date(),
-          },
-        });
+      // TRIGGER AUTOMÁTICO: Mover a "Cotización Enviada" o "Ganado"
+      const esGanada = ['Ganada', 'Aprobado', 'Aprobada'].includes(dto.estado);
 
-        await this.prisma.interaccion.create({
-          data: {
-            clientId: cotizacion.clientId,
-            fecha: new Date(),
-            tipo: 'Propuesta',
-            accion: 'Cotización Registrada',
-            observaciones: `Se registró la cotización ${cotizacion.codigo} por un monto de S/ ${cotizacion.monto}. El cliente ha sido movido automáticamente a etapa "Cotización Enviada".`,
-            usuario: 'SISTEMA',
-          },
-        });
+      try {
+        if (esGanada) {
+          // 1. Actualizar Etapa del Cliente a "Ganado"
+          await this.prisma.cliente.update({
+            where: { id: cotizacion.clientId },
+            data: {
+              etapaComercial: 'Ganado',
+              accion: 'Finalizado',
+              esClienteReal: true,
+              ultimoContacto: new Date(),
+            },
+          });
+
+          // 2. Crear interacción de cierre
+          await this.prisma.interaccion.create({
+            data: {
+              clientId: cotizacion.clientId,
+              cotizacionId: cotizacion.id,
+              fecha: new Date(),
+              tipo: 'Venta',
+              accion: 'Cotización Ganada',
+              observaciones: `La cotización ${cotizacion.codigo} por S/ ${cotizacion.monto} ha sido creada directamente como Ganada. El cliente ha pasado a etapa "Ganado".`,
+              usuario: 'SISTEMA',
+            },
+          });
+
+          // 3. Notificar a admins
+          const admins = await this.prisma.usuario.findMany({
+            where: { rol: 'ADMIN' },
+          });
+          for (const admin of admins) {
+            await this.notificacionesService.create({
+              usuarioId: admin.id,
+              titulo: '¡Venta Cerrada Directa!',
+              mensaje: `La cotización ${cotizacion.codigo} ha sido GANADA en el mismo momento de su creación.`,
+              tipo: 'COTIZACION',
+            });
+          }
+
+          // 4. AUTO-GENERACIÓN: Proyecto + OrdenDeServicio
+          this.autoGenerarDesdeGanada(cotizacion, null, liderId).catch((err) => {
+            console.error('[Cotizaciones] Error en auto-generación al ganar en create:', err.message);
+          });
+
+        } else {
+          await this.prisma.cliente.update({
+            where: { id: cotizacion.clientId },
+            data: {
+              etapaComercial: 'Cotización Enviada',
+              accion: 'Hacer Seguimiento',
+              ultimoContacto: new Date(),
+            },
+          });
+
+          await this.prisma.interaccion.create({
+            data: {
+              clientId: cotizacion.clientId,
+              fecha: new Date(),
+              tipo: 'Propuesta',
+              accion: 'Cotización Registrada',
+              observaciones: `Se registró la cotización ${cotizacion.codigo} por un monto de S/ ${cotizacion.monto}. El cliente ha sido movido automáticamente a etapa "Cotización Enviada".`,
+              usuario: 'SISTEMA',
+            },
+          });
+        }
       } catch (triggerError) {
         console.error(
-          '[Cotizaciones] Error en trigger de actualización de etapa:',
+          '[Cotizaciones] Error en trigger de actualización de etapa en create:',
           triggerError.message,
         );
       }
@@ -238,6 +221,7 @@ export class CotizacionesService {
       alcance,
       cajaId,
       hitos,
+      liderId,
       ...quoteData
     } = dto;
 
@@ -247,19 +231,6 @@ export class CotizacionesService {
       fecha: fecha ? new Date(fecha) : undefined,
       alcance: alcance !== undefined ? alcance : undefined,
     };
-
-    if (hitos) {
-      updateData.hitosPago = {
-        deleteMany: {},
-        create: hitos.map((h: any) => ({
-          descripcion: h.descripcion,
-          porcentaje: Number(h.porcentaje),
-          monto: Number(h.monto),
-          fechaEstimada: h.fechaEstimada ? new Date(h.fechaEstimada) : null,
-          estado: h.estado || 'PENDIENTE',
-        })),
-      };
-    }
 
     // Si se subió un nuevo archivo, lo agregamos a los documentos de la cotización e incrementamos la versión
     if (fileUrl) {
@@ -290,103 +261,15 @@ export class CotizacionesService {
         },
       });
 
-      // LÓGICA DE INTEGRACIÓN FINANCIERA (CAJA)
-      // Solo se activa si la diferencia de dinero cobrado cambia
-      
-      // 1. Obtener historial de lo ya ingresado a caja por esta cotización y sus versiones anteriores
-      const chainIds = await this.getVersionChainIds(result.id);
-      
-      const [transacciones, facturas] = await Promise.all([
-        tx.transaccionCaja.findMany({
-          where: {
-            referenciaTipo: 'COTIZACION',
-            referenciaId: { in: chainIds }
-          }
-        }),
-        tx.factura.findMany({
-          where: { cotizacionId: { in: chainIds } },
-          include: { pagos: true }
-        })
-      ]);
-
-      let saldoIngresado = 0;
-      // Sumar transacciones directas de caja (adelantos sin factura)
-      for (const t of transacciones) {
-        if (t.tipo === 'INGRESO') saldoIngresado += Number(t.monto);
-        if (t.tipo === 'EGRESO') saldoIngresado -= Number(t.monto);
-      }
-
-      // Sumar pagos recibidos por facturas vinculadas a esta cadena de cotizaciones
-      for (const f of facturas) {
-        for (const p of f.pagos) {
-          saldoIngresado += Number(p.monto);
-        }
-      }
-
-      // 2. Calcular el nuevo monto objetivo basado solo en hitos COBRADOS
-      // NOTA: Ignoramos explícitamente 'REPORTE_PAGO' porque es un estado transitorio para validación de finanzas
-      let montoObjetivo = 0;
-      if (result.hitosPago && result.hitosPago.length > 0) {
-        montoObjetivo = result.hitosPago
-          .filter((h: any) => h.estado === 'COBRADO')
-          .reduce((sum: number, h: any) => sum + Number(h.monto), 0);
-      } else if (['Aprobado', 'Aprobada'].includes(result.estado)) {
-        // Solo si NO hay hitos, la aprobación marca el monto total como cobrado (retrocompatibilidad)
-        montoObjetivo = Number(result.monto);
-      }
-
-      const diferencia = Number((montoObjetivo - saldoIngresado).toFixed(2));
-
-      if (diferencia !== 0) {
-        if (!cajaId) {
-          throw new BadRequestException('Se ha detectado un cambio en los hitos cobrados. Debe seleccionar una caja de destino para procesar el ingreso de dinero.');
-        }
-
-        const proyectoRelacionado = await tx.proyecto.findFirst({
-          where: { cotizacionOrigen: { id: result.id } }
-        });
-        const nombreProyecto = proyectoRelacionado?.nombre || 'Preventa';
-        const nombreCliente = result.cliente?.empresa || 'Cliente Desconocido';
-
-        // Identificar si es un adelanto adicional para el concepto
-        const esAdelantoAdicional = hitos?.some((h: any) => 
-          h.estado === 'COBRADO' && 
-          (h.descripcion.toLowerCase().includes('adelanto') || h.descripcion.toLowerCase().includes('adicional'))
-        );
-
-        const tipoMovimiento = esAdelantoAdicional ? 'Adelanto Adicional' : 'Ajuste Hitos';
-        const signo = diferencia > 0 ? '+' : '-';
-        const conceptoText = `${tipoMovimiento}: ${result.codigo} | Cliente: ${nombreCliente} | Proyecto: ${nombreProyecto} | Ajuste: ${signo}S/ ${Math.abs(diferencia)}`;
-
-        if (diferencia > 0) {
-          await this.finanzasService.sincronizarSaldoIngreso(
-            tx,
-            diferencia,
-            cajaId,
-            conceptoText,
-            'COTIZACION',
-            result.id,
-            user?.id || 'SISTEMA'
-          );
-        } else {
-          // Si el usuario reduce el monto cobrado (ej: desmarca un hito), se genera un egreso de ajuste
-          await this.finanzasService.sincronizarSaldoEgreso(
-            tx,
-            Math.abs(diferencia),
-            cajaId,
-            conceptoText,
-            'COTIZACION',
-            result.id,
-            user?.id || 'SISTEMA'
-          );
-        }
-      }
-
       return result;
     });
 
     // TRIGGER: Notificación de Venta Cerrada y Actualización de Cliente
-    if (['Aprobado', 'Aprobada'].includes(dto.estado) && !['Aprobado', 'Aprobada'].includes(oldQuote.estado)) {
+    // Compatible con estados nuevos (Ganada) y legacy (Aprobado/Aprobada)
+    const esGanada = ['Ganada', 'Aprobado', 'Aprobada'].includes(dto.estado);
+    const eraGanada = ['Ganada', 'Aprobado', 'Aprobada'].includes(oldQuote.estado);
+
+    if (esGanada && !eraGanada) {
       try {
         // 1. Actualizar Etapa del Cliente a "Ganado"
         await this.prisma.cliente.update({
@@ -406,8 +289,8 @@ export class CotizacionesService {
             cotizacionId: updated.id,
             fecha: new Date(),
             tipo: 'Venta',
-            accion: 'Cotización Aprobada',
-            observaciones: `La cotización ${updated.codigo} por S/ ${updated.monto} ha sido aprobada. El cliente ha pasado a etapa "Ganado".`,
+            accion: 'Cotización Ganada',
+            observaciones: `La cotización ${updated.codigo} por S/ ${updated.monto} ha sido marcada como Ganada. El cliente ha pasado a etapa "Ganado".`,
             usuario: 'SISTEMA',
           },
         });
@@ -418,6 +301,7 @@ export class CotizacionesService {
         );
       }
 
+      // 3. Notificar a admins
       const admins = await this.prisma.usuario.findMany({
         where: { rol: 'ADMIN' },
       });
@@ -425,13 +309,235 @@ export class CotizacionesService {
         await this.notificacionesService.create({
           usuarioId: admin.id,
           titulo: '¡Venta Cerrada!',
-          mensaje: `La cotización ${updated.codigo} del cliente ${oldQuote.cliente.empresa} ha sido APROBADA.`,
+          mensaje: `La cotización ${updated.codigo} del cliente ${oldQuote.cliente.empresa} ha sido GANADA.`,
           tipo: 'COTIZACION',
         });
       }
+
+      // 4. AUTO-GENERACIÓN: Proyecto + OrdenDeServicio (en background, no bloquea)
+      this.autoGenerarDesdeGanada(updated, user, liderId).catch((err) => {
+        console.error('[Cotizaciones] Error en auto-generación al ganar:', err.message);
+      });
     }
 
     return updated;
+  }
+
+  // ============================================================
+  // AUTO-GENERACIÓN: Se dispara cuando una cotización es Ganada
+  // ============================================================
+  private async autoGenerarDesdeGanada(cotizacion: any, user?: any, liderId?: string) {
+    console.log(`[AutoGen] Iniciando generación automática para cotización ${cotizacion.codigo}`);
+
+    // Validación: debe tener PDF adjunto
+    const documentos = await this.prisma.documento.findMany({
+      where: { cotizacionId: cotizacion.id },
+    });
+    if (!documentos || documentos.length === 0) {
+      console.warn(`[AutoGen] Cotización ${cotizacion.codigo} sin documentos adjuntos. Proyecto no generado automáticamente.`);
+      return;
+    }
+
+    // Validación: no generar si ya tiene proyecto
+    if (cotizacion.proyectoGeneradoId) {
+      console.log(`[AutoGen] Cotización ${cotizacion.codigo} ya tiene proyecto generado. Omitiendo.`);
+      return;
+    }
+
+    // Validación: cliente sin proyecto activo
+    const proyectoActivo = await this.prisma.proyecto.findFirst({
+      where: {
+        clientId: cotizacion.clientId,
+        estado: { not: 'Finalizado' },
+      },
+    });
+    if (proyectoActivo) {
+      console.warn(`[AutoGen] Cliente ya tiene proyecto activo (${proyectoActivo.codigo}). Proyecto no generado automáticamente.`);
+      // Notificar al admin del bloqueo
+      const admins = await this.prisma.usuario.findMany({ where: { rol: 'ADMIN' } });
+      for (const admin of admins) {
+        await this.notificacionesService.create({
+          usuarioId: admin.id,
+          titulo: '⚠️ Proyecto no generado automáticamente',
+          mensaje: `La cotización ${cotizacion.codigo} fue ganada, pero el cliente ya tiene el proyecto activo "${proyectoActivo.nombre}". Genera el proyecto manualmente cuando corresponda.`,
+          tipo: 'SISTEMA',
+        });
+      }
+      return;
+    }
+
+    // Obtener responsable por defecto o el asignado
+    const responsablePorDefecto = liderId 
+      ? await this.prisma.responsable.findUnique({ where: { id: liderId } })
+      : await this.prisma.responsable.findFirst({
+          where: { activo: true },
+          orderBy: { id: 'asc' },
+        });
+    if (!responsablePorDefecto) {
+      console.error('[AutoGen] No hay responsables activos en el sistema. Proyecto no generado.');
+      return;
+    }
+
+    const proyectoId = uuidv4();
+    const projectCode = await this.generateProyectoCodigo();
+    const osCode = await this.generateOsCodigo();
+    const hoy = new Date();
+    const en30Dias = new Date(hoy);
+    en30Dias.setDate(en30Dias.getDate() + 30);
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // 1. Crear Proyecto
+        const proyecto = await tx.proyecto.create({
+          data: {
+            id: proyectoId,
+            codigo: projectCode,
+            nombre: `PROYECTO: ${String(cotizacion.referencia || cotizacion.codigo).toUpperCase()}`,
+            descripcion: cotizacion.objetivo || '',
+            estado: 'Planificacion',
+            semaforo: 'Verde',
+            prioridad: 'Media',
+            area: 'OperacionesDeCampo',
+            fechaInicio: hoy,
+            fechaFinEstimada: en30Dias,
+            responsablePrincipalId: responsablePorDefecto.id,
+            responsablesAdicionales: [],
+            ventaContratada: Number(cotizacion.monto),
+            costoPresupuestado: 0,
+            margenMeta: Number(cotizacion.monto),
+            avance: 0,
+            avanceCalculado: 0,
+            clientId: cotizacion.clientId,
+            // Nuevos campos Fase 1
+            estadoFinanciero: 'SinPago',
+            autorizaCompras: false,
+            estadoLogistica: 'PendienteRevision',
+            creadoPor: user?.nombre || 'SISTEMA',
+            cotizacionOrigen: { connect: { id: cotizacion.id } },
+          },
+        });
+
+        // 2. Crear Orden de Servicio
+        await tx.ordenDeServicio.create({
+          data: {
+            codigo: osCode,
+            cotizacionId: cotizacion.id,
+            proyectoId: proyecto.id,
+            terminos: cotizacion.objetivo || '',
+            observaciones: cotizacion.alcance ? JSON.stringify(cotizacion.alcance) : null,
+            estado: 'Activo',
+          },
+        });
+
+        // 3. Cargar adelantos desde hitos COBRADOS
+        const hitosCobrados = await tx.hitoPago.findMany({
+          where: { cotizacionId: cotizacion.id, estado: 'COBRADO' },
+        });
+        for (const hito of hitosCobrados) {
+          await tx.adelantoProyecto.create({
+            data: {
+              id: uuidv4(),
+              proyectoId: proyecto.id,
+              monto: Number(hito.monto),
+              fechaRecibido: new Date(),
+              metodo: 'TRANSFERENCIA',
+              referencia: `Hito: ${hito.descripcion}`,
+              saldoDisponible: Number(hito.monto),
+              montoAplicado: 0,
+              observaciones: `Cargado automáticamente desde Cotización ${cotizacion.codigo}`,
+              registradoPorId: user?.id || 'SISTEMA',
+              updatedAt: new Date(),
+            },
+          });
+          // Si hay adelantos, autorizar compras y actualizar estado financiero
+          await tx.proyecto.update({
+            where: { id: proyecto.id },
+            data: {
+              estadoFinanciero: 'AdelantoRecibido',
+              autorizaCompras: true,
+            },
+          });
+        }
+      });
+
+      console.log(`[AutoGen] ✅ Proyecto ${projectCode} y OS ${osCode} generados exitosamente.`);
+
+      // 4. Notificar a usuarios de Finanzas, Logística y Operaciones
+      const usuariosTarget = await this.prisma.usuario.findMany({
+        where: { activo: true },
+      });
+      const cotizacionConCliente = await this.prisma.cotizacion.findUnique({
+        where: { id: cotizacion.id },
+        include: { cliente: true },
+      });
+      
+      const liderNombre = responsablePorDefecto?.nombre || 'Alguien del equipo';
+
+      for (const u of usuariosTarget) {
+        let modulos: string[] = [];
+        try {
+          modulos = Array.isArray(u.modulos) ? u.modulos as string[] : JSON.parse(u.modulos as string);
+        } catch(e) {
+          modulos = [];
+        }
+
+        const esFinanzasOLogistica = modulos.some((m) =>
+          ['finanzas', 'logistica', 'dashboard'].includes(m.toLowerCase()),
+        );
+        const esOperaciones = modulos.some((m) =>
+          ['operaciones', 'dashboard'].includes(m.toLowerCase()),
+        );
+
+        if (esFinanzasOLogistica) {
+          await this.notificacionesService.create({
+            usuarioId: u.id,
+            titulo: '🎉 Nuevo Proyecto Generado',
+            mensaje: `Se ganó la cotización ${cotizacion.codigo} del cliente ${cotizacionConCliente?.cliente?.empresa || ''}. Proyecto ${projectCode} listo en Finanzas y Logística.`,
+            tipo: 'SISTEMA',
+          });
+        }
+
+        if (esOperaciones) {
+          await this.notificacionesService.create({
+            usuarioId: u.id,
+            titulo: '🛠️ Nuevo Proyecto Asignado',
+            mensaje: `El Proyecto ${projectCode} ha sido generado exitosamente. Se ha designado a ${liderNombre.toUpperCase()} como Líder del Proyecto.`,
+            tipo: 'SISTEMA',
+          });
+        }
+      }
+    } catch (err) {
+      console.error(`[AutoGen] ❌ Error en transacción:`, err);
+      throw err;
+    }
+  }
+
+  // Genera código único para Proyecto (ej: HHT-OPE-26-005)
+  private async generateProyectoCodigo(): Promise<string> {
+    const year = new Date().getFullYear().toString().slice(-2);
+    const prefix = `HHT-OPE-${year}-`;
+    const count = await this.prisma.proyecto.count();
+    let next = count + 1;
+    let code = `${prefix}${next.toString().padStart(3, '0')}`;
+    while (await this.prisma.proyecto.findUnique({ where: { codigo: code } })) {
+      next++;
+      code = `${prefix}${next.toString().padStart(3, '0')}`;
+    }
+    return code;
+  }
+
+  // Genera código único para Orden de Servicio (ej: OS-2026-001)
+  private async generateOsCodigo(): Promise<string> {
+    const year = new Date().getFullYear();
+    const prefix = `OS-${year}-`;
+    const count = await this.prisma.ordenDeServicio.count();
+    let next = count + 1;
+    let code = `${prefix}${next.toString().padStart(3, '0')}`;
+    while (await this.prisma.ordenDeServicio.findUnique({ where: { codigo: code } })) {
+      next++;
+      code = `${prefix}${next.toString().padStart(3, '0')}`;
+    }
+    return code;
   }
 
   async findAll(page: number = 1, limit: number = 20, filters: any = {}) {
@@ -493,20 +599,56 @@ export class CotizacionesService {
   async remove(id: string) {
     const cotizacion = await this.prisma.cotizacion.findUnique({
       where: { id },
-      include: { documentos: { select: { url: true } } },
+      include: { 
+        documentos: { select: { url: true } },
+        hitosPago: true,
+        facturas: true,
+        ordenesDeServicio: true,
+        revisiones: true
+      },
     });
 
     if (!cotizacion) {
       throw new NotFoundException(`Cotización con ID "${id}" no encontrada.`);
     }
 
+    if (
+      cotizacion.facturas.length > 0 || 
+      cotizacion.ordenesDeServicio.length > 0 || 
+      cotizacion.proyectoGeneradoId ||
+      cotizacion.revisiones.length > 0
+    ) {
+      const razones = [];
+      if (cotizacion.facturas.length > 0) razones.push(`${cotizacion.facturas.length} factura(s)`);
+      if (cotizacion.ordenesDeServicio.length > 0) razones.push(`${cotizacion.ordenesDeServicio.length} orden(es) de servicio`);
+      if (cotizacion.proyectoGeneradoId) razones.push('1 proyecto generado');
+      if (cotizacion.revisiones.length > 0) razones.push(`${cotizacion.revisiones.length} revisión(es) hija(s)`);
+
+      throw new BadRequestException(`No se puede eliminar la cotización porque tiene registros vinculados: ${razones.join(', ')}.`);
+    }
+
     const urlsToDelete = cotizacion.documentos.map((d) => d.url).filter(Boolean);
 
-    const result = await this.prisma.cotizacion.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.hitoPago.deleteMany({ where: { cotizacionId: id } });
+      await tx.documento.deleteMany({ where: { cotizacionId: id } });
+      
+      // Update interacciones just in case Prisma SetNull fails implicitly
+      await tx.interaccion.updateMany({
+        where: { cotizacionId: id },
+        data: { cotizacionId: null }
+      });
 
-    await deletePhysicalFiles(urlsToDelete);
+      await tx.cotizacion.delete({ where: { id } });
+    });
 
-    return result;
+    try {
+      await deletePhysicalFiles(urlsToDelete);
+    } catch (e) {
+      console.error("Error deleting physical files", e);
+    }
+
+    return { message: "Cotización eliminada exitosamente" };
   }
 
   private async generateCode(): Promise<string> {

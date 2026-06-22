@@ -21,6 +21,7 @@ import {
   NivelAprobacion,
   EstadoRendicion,
   PrioridadGasto,
+  Area,
 } from '@prisma/client';
 import { deletePhysicalFiles } from '../common/utils/file-utils';
 
@@ -896,8 +897,8 @@ export class FinanzasService {
         include: { proveedor: true, proyecto: true },
       });
 
-      // Intentar bloquear fondos, pero no fallar si no hay (se registra la obligación)
-      try {
+      // Intentar bloquear fondos (solo si está aprobado o pagado directamente)
+      if (gasto.estado === 'APROBADO' || gasto.estado === 'PAGADO') {
         await this.blockFunds(
           Number(gasto.montoTotal),
           `Reserva: ${gasto.concepto}`,
@@ -907,8 +908,6 @@ export class FinanzasService {
           targetCajaId || undefined,
           tx,
         );
-      } catch (e) {
-        console.warn(`[Finanzas] No se pudo bloquear fondos para el gasto ${gasto.id}: ${e.message}`);
       }
       
       if (gasto.proyectoId) {
@@ -970,7 +969,12 @@ export class FinanzasService {
         data,
       });
 
-      if (currentGasto.estado === 'PENDIENTE' && data.estado === 'PAGADO') {
+      if (
+        (currentGasto.estado === 'PENDIENTE' || currentGasto.estado === 'SOLICITADO' || currentGasto.estado === 'APROBADO') && 
+        data.estado === 'PAGADO'
+      ) {
+        const wasCommitted = currentGasto.estado === 'APROBADO'; // Solo los APROBADOS bloquearon fondos
+
         await this.executeExpense(
           Number(updatedGasto.montoTotal),
           `Pago: ${updatedGasto.concepto}`,
@@ -978,7 +982,7 @@ export class FinanzasService {
           updatedGasto.id,
           usuarioId || updatedGasto.registradoPorId,
           updatedGasto.cajaId ?? undefined,
-          true, // wasCommitted = true, esto liberará el saldo comprometido
+          wasCommitted,
           tx,
         );
 
@@ -1938,6 +1942,37 @@ export class FinanzasService {
     const execute = async (tx: any) => {
       const dbCaja = await tx.caja.findUnique({ where: { id: targetCajaId } });
       if (!dbCaja) return;
+
+      // VALIDACIÓN DE PRESUPUESTO DEL PROYECTO
+      if (refType === 'GASTO') {
+        const dbGasto = await tx.gasto.findUnique({
+          where: { id: refId },
+          include: { proyecto: true },
+        });
+        if (dbGasto?.proyecto) {
+          const costoPresupuestado = Number(dbGasto.proyecto.costoPresupuestado);
+          const gastos = await tx.gasto.findMany({
+            where: { 
+              proyectoId: dbGasto.proyecto.id, 
+              estado: { in: ['APROBADO', 'PAGADO', 'PAGO_PARCIAL'] },
+              id: { not: refId } // Excluir este mismo gasto
+            }
+          });
+          const costoTotalReal = gastos.reduce((sum: number, g: any) => sum + Number(g.montoTotal), 0);
+          const presupuestoDisponible = costoPresupuestado - costoTotalReal;
+
+          if (monto > presupuestoDisponible) {
+            throw new BadRequestException(`Operación denegada: El proyecto ${dbGasto.proyecto.nombre} ha agotado su presupuesto. Saldo restante: S/ ${presupuestoDisponible.toFixed(2)}.`);
+          }
+        }
+      }
+
+      // VALIDACIÓN DE CAJA
+      const saldoDisponibleReal = Number(dbCaja.saldoDisponible);
+      if (monto > saldoDisponibleReal) {
+        throw new BadRequestException(`Operación denegada: La caja ${dbCaja.nombre} solo tiene S/ ${saldoDisponibleReal.toFixed(2)} disponible. No hay liquidez suficiente para reservar.`);
+      }
+
       const nuevoComprometido = Number(dbCaja.saldoComprometido) + monto;
       await tx.caja.update({
         where: { id: targetCajaId },
@@ -2039,7 +2074,31 @@ export class FinanzasService {
         });
         if (dbGasto?.proyecto) {
           finalConcepto = `${concepto} [PROY: ${dbGasto.proyecto.codigo || dbGasto.proyecto.nombre}]`;
+
+          // VALIDACIÓN DE PRESUPUESTO DEL PROYECTO
+          const costoPresupuestado = Number(dbGasto.proyecto.costoPresupuestado);
+          const gastos = await tx.gasto.findMany({
+            where: { 
+              proyectoId: dbGasto.proyecto.id, 
+              estado: { in: ['APROBADO', 'PAGADO', 'PAGO_PARCIAL'] },
+              id: { not: refId } // Excluir este mismo gasto
+            }
+          });
+          const costoTotalReal = gastos.reduce((sum: number, g: any) => sum + Number(g.montoTotal), 0);
+          const presupuestoDisponible = costoPresupuestado - costoTotalReal;
+
+          if (monto > presupuestoDisponible) {
+            throw new BadRequestException(`Operación denegada: El proyecto ${dbGasto.proyecto.nombre} ha agotado su presupuesto. Saldo restante: S/ ${presupuestoDisponible.toFixed(2)}.`);
+          }
         }
+      }
+
+      // VALIDACIÓN DE CAJA
+      if (!wasCommitted && monto > Number(dbCaja.saldoDisponible)) {
+        throw new BadRequestException(`Operación denegada: La caja ${dbCaja.nombre} solo tiene S/ ${Number(dbCaja.saldoDisponible).toFixed(2)} disponible. Liquidez insuficiente.`);
+      }
+      if (monto > Number(dbCaja.saldoReal)) {
+        throw new BadRequestException(`Operación denegada: La caja ${dbCaja.nombre} no tiene saldo real suficiente para este retiro.`);
       }
 
       const nuevoReal = Number(dbCaja.saldoReal) - monto;
@@ -2175,7 +2234,20 @@ export class FinanzasService {
 
   async getGlobalKPIs() {
     const [clients, projects, facturas, pagos] = await Promise.all([
-      this.prisma.cliente.count({ where: { deletedAt: null } }),
+      this.prisma.cliente.count({ 
+        where: { 
+          deletedAt: null,
+          OR: [
+            { etapaComercial: 'Ganado' },
+            { etapaComercial: 'Orden de Servicio' },
+            { etapaComercial: 'Cotización Enviada' },
+            { etapaComercial: 'Cotizacion Enviada' },
+            { etapaComercial: 'Inspección Realizada' },
+            { etapaComercial: 'Inspeccion Realizada' },
+            { tipoCliente: 'CLIENTE' }
+          ]
+        } 
+      }),
       this.prisma.proyecto.count({ where: { estado: 'EnEjecucion' as any } }),
       this.prisma.factura.findMany({
         where: { estado: { not: 'ANULADA' } },
@@ -2624,5 +2696,378 @@ export class FinanzasService {
     );
 
     return cashFlow;
+  }
+
+  // ============================================
+  // BANDEJA FINANZAS (Fase 3)
+  // ============================================
+
+  async getProyectosPendientesFinanzas() {
+    return this.prisma.proyecto.findMany({
+      where: {
+        estado: { not: 'Finalizado' },
+        cotizacionOrigen: { isNot: null },
+      },
+      select: {
+        id: true,
+        codigo: true,
+        nombre: true,
+        estado: true,
+        estadoFinanciero: true,
+        autorizaCompras: true,
+        estadoLogistica: true,
+        ventaContratada: true,
+        costoPresupuestado: true,
+        fechaCreacion: true,
+        cliente: { select: { id: true, empresa: true, ruc: true } },
+        cotizacionOrigen: {
+          select: {
+            id: true,
+            codigo: true,
+            monto: true,
+            formaPago: true,
+            ordenesDeServicio: {
+              select: { id: true, codigo: true, estado: true },
+            },
+          },
+        },
+        adelantos: { select: { monto: true, fechaRecibido: true } },
+      },
+      orderBy: { fechaCreacion: 'desc' },
+    });
+  }
+
+  async updateEstadoFinanciero(
+    proyectoId: string,
+    estadoFinanciero: string,
+    autorizaCompras: boolean,
+  ) {
+    const proyecto = await this.prisma.proyecto.findUnique({
+      where: { id: proyectoId },
+    });
+    if (!proyecto) throw new NotFoundException('Proyecto no encontrado.');
+
+    const dataToUpdate: any = {};
+
+    if (estadoFinanciero !== undefined) {
+      const estadosValidos = [
+        'SinPago',
+        'AdelantoRecibido',
+        'Aprobado',
+        'Observado',
+      ];
+      if (!estadosValidos.includes(estadoFinanciero)) {
+        throw new BadRequestException(
+          `Estado financiero inválido. Use: ${estadosValidos.join(', ')}`,
+        );
+      }
+      dataToUpdate.estadoFinanciero = estadoFinanciero;
+    }
+
+    if (autorizaCompras !== undefined) {
+      dataToUpdate.autorizaCompras = autorizaCompras;
+    }
+
+    return this.prisma.proyecto.update({
+      where: { id: proyectoId },
+      data: dataToUpdate,
+    });
+  }
+
+  // ============================================
+  // GESTIÓN FINANCIERA DIRECTA EN BANDEJA
+  // ============================================
+
+  async getProyectoFinanzasDetalle(id: string) {
+    const proyecto = await this.prisma.proyecto.findUnique({
+      where: { id },
+      include: {
+        cliente: true,
+        documentos: true,
+        cotizacionOrigen: {
+          include: { hitosPago: true, documentos: true },
+        },
+        facturas: {
+          include: { pagos: true },
+          orderBy: { fechaEmision: 'asc' },
+        },
+        adelantos: true,
+      },
+    });
+    if (!proyecto) throw new NotFoundException('Proyecto no encontrado');
+    return proyecto;
+  }
+
+  async crearFacturaDesdeBandeja(proyectoId: string, dto: { hitoId?: string; monto: number; descripcion: string; fechaVencimiento: string }, usuarioId: string) {
+    const proyecto = await this.prisma.proyecto.findUnique({ where: { id: proyectoId }, include: { cotizacionOrigen: true } });
+    if (!proyecto) throw new NotFoundException('Proyecto no encontrado');
+    
+    // Si hay un hito asociado, podríamos marcarlo como facturado o usarlo de referencia.
+    // Creamos la factura:
+    return this.prisma.factura.create({
+      data: {
+        clienteId: proyecto.clientId || '',
+        proyectoId: proyecto.id,
+        cotizacionId: proyecto.cotizacionOrigen?.id,
+        codigo: `FAC-${Date.now().toString().slice(-6)}`,
+        observaciones: dto.descripcion,
+        montoTotal: dto.monto,
+        saldoPendiente: dto.monto,
+        fechaVencimiento: new Date(dto.fechaVencimiento),
+        estado: 'PENDIENTE',
+        hitoPagoId: dto.hitoId,
+      },
+    });
+  }
+
+  async registrarPagoBandeja(proyectoId: string, dto: { facturaId: string; cajaId: string; monto: number; referencia: string; comprobanteUrl?: string }, usuarioId: string) {
+    const factura = await this.prisma.factura.findUnique({ where: { id: dto.facturaId } });
+    if (!factura) throw new NotFoundException('Factura no encontrada');
+
+    // Reutilizar la lógica real de pagos para mantener la consistencia
+    const pago = await this.registerPago({
+      facturaId: dto.facturaId,
+      cajaId: dto.cajaId,
+      monto: dto.monto,
+      fechaPago: new Date().toISOString(),
+      metodo: 'TRANSFERENCIA',
+      referencia: dto.referencia,
+      observaciones: 'Pago registrado desde Bandeja de Proyectos',
+      comprobanteUrl: dto.comprobanteUrl,
+    }, usuarioId);
+
+    // Actualizar el estado del proyecto automáticamente!
+    const updatedFactura = await this.prisma.factura.findUnique({ where: { id: dto.facturaId } });
+    const isTotalmentePagada = updatedFactura && Number(updatedFactura.saldoPendiente) <= 0;
+
+    // Crear el registro de Adelanto explícito para que se refleje en los sumarios y reportes
+    await this.prisma.adelantoProyecto.create({
+      data: {
+        proyectoId: proyectoId,
+        monto: dto.monto,
+        saldoDisponible: dto.monto,
+        metodo: 'TRANSFERENCIA',
+        referencia: dto.referencia,
+        comprobanteUrl: dto.comprobanteUrl,
+        fechaRecibido: new Date(),
+        registradoPorId: usuarioId,
+      }
+    });
+
+    // Si es un pago, pasamos a Adelanto Recibido y autorizamos
+    await this.prisma.proyecto.update({
+      where: { id: proyectoId },
+      data: {
+        estadoFinanciero: isTotalmentePagada ? 'Aprobado' : 'AdelantoRecibido',
+        autorizaCompras: true, // Automáticamente abrimos el caño a Logística
+      },
+    });
+
+    return pago;
+  }
+
+  async adjuntarDocumentoBandeja(proyectoId: string, data: { nombre: string; url: string; tipo: string; tamano: string; subidoPor: string }) {
+    return this.prisma.documento.create({
+      data: {
+        proyectoId,
+        nombre: data.nombre,
+        url: data.url,
+        estado: 'Aprobado',
+        tipo: (data.tipo as any) || 'Financiero',
+        tamano: data.tamano,
+        subidoPor: data.subidoPor,
+      },
+    });
+  }
+
+  async eliminarDocumentoBandeja(proyectoId: string, documentoId: string) {
+    const doc = await this.prisma.documento.findUnique({ where: { id: documentoId } });
+    if (!doc) throw new NotFoundException('Documento no encontrado');
+    
+    return this.prisma.documento.delete({ where: { id: documentoId } });
+  }
+
+  async crearHitoBandeja(proyectoId: string, dto: { monto: number; descripcion: string }) {
+    const proyecto = await this.prisma.proyecto.findUnique({ where: { id: proyectoId }, include: { cotizacionOrigen: true } });
+    if (!proyecto) throw new NotFoundException('Proyecto no encontrado');
+
+    const cotizacion = await this.prisma.cotizacion.findFirst({
+      where: { proyectoGeneradoId: proyectoId },
+      include: { hitosPago: true }
+    });
+
+    if (!cotizacion) throw new BadRequestException('El proyecto no tiene cotizacion origen');
+
+    const ventaContratada = Number(proyecto.ventaContratada || 0);
+    const sumaHitosAnteriores = cotizacion.hitosPago.reduce((sum, hito) => sum + Number(hito.monto), 0);
+    
+    if (sumaHitosAnteriores + dto.monto > ventaContratada) {
+      const disponible = ventaContratada - sumaHitosAnteriores;
+      throw new BadRequestException(`El monto excede la venta contratada. Disponible: S/ ${disponible.toFixed(2)}`);
+    }
+
+    const totalMonto = cotizacion.monto ? Number(cotizacion.monto) : 0;
+    const porcentaje = totalMonto > 0 ? (dto.monto / totalMonto) * 100 : 0;
+
+    return this.prisma.hitoPago.create({
+      data: {
+        descripcion: dto.descripcion,
+        monto: dto.monto,
+        porcentaje,
+        cotizacionId: cotizacion.id,
+        estado: 'PENDIENTE',
+      }
+    });
+  }
+
+  async actualizarHitoBandeja(proyectoId: string, hitoId: string, dto: { monto: number; descripcion: string }) {
+    const proyecto = await this.prisma.proyecto.findUnique({ where: { id: proyectoId } });
+    if (!proyecto) throw new NotFoundException('Proyecto no encontrado');
+
+    const hito = await this.prisma.hitoPago.findUnique({ 
+      where: { id: hitoId },
+      include: { cotizacion: { include: { hitosPago: true } } }
+    });
+    if (!hito) throw new NotFoundException('Hito no encontrado');
+
+    const ventaContratada = Number(proyecto.ventaContratada || 0);
+    const sumaHitosTotales = hito.cotizacion.hitosPago.reduce((sum, h) => sum + Number(h.monto), 0);
+    const sumaSinHitoActual = sumaHitosTotales - Number(hito.monto);
+
+    if (sumaSinHitoActual + dto.monto > ventaContratada) {
+      const disponible = ventaContratada - sumaSinHitoActual;
+      throw new BadRequestException(`El monto excede la venta contratada. Disponible: S/ ${disponible.toFixed(2)}`);
+    }
+
+    return this.prisma.hitoPago.update({
+      where: { id: hitoId },
+      data: {
+        monto: dto.monto,
+        descripcion: dto.descripcion,
+      },
+    });
+  }
+
+  async eliminarHitoBandeja(proyectoId: string, hitoId: string) {
+    const proyecto = await this.prisma.proyecto.findUnique({ where: { id: proyectoId } });
+    if (!proyecto) throw new NotFoundException('Proyecto no encontrado');
+
+    const hito = await this.prisma.hitoPago.findUnique({ where: { id: hitoId } });
+    if (!hito) throw new NotFoundException('Hito no encontrado');
+
+    return this.prisma.hitoPago.delete({
+      where: { id: hitoId },
+    });
+  }
+
+  async actualizarVentaContratada(proyectoId: string, monto: number) {
+    const proyecto = await this.prisma.proyecto.findUnique({ where: { id: proyectoId }, include: { cotizacionOrigen: true } });
+    if (!proyecto) throw new NotFoundException('Proyecto no encontrado');
+
+    await this.prisma.proyecto.update({
+      where: { id: proyectoId },
+      data: { ventaContratada: monto },
+    });
+
+    if (proyecto.cotizacionOrigen) {
+      await this.prisma.cotizacion.update({
+        where: { id: proyecto.cotizacionOrigen.id },
+        data: { monto: monto },
+      });
+    }
+
+    return { success: true };
+  }
+
+  async actualizarCostoPresupuestado(proyectoId: string, monto: number) {
+    const proyecto = await this.prisma.proyecto.findUnique({ where: { id: proyectoId } });
+    if (!proyecto) throw new NotFoundException('Proyecto no encontrado');
+
+    await this.prisma.proyecto.update({
+      where: { id: proyectoId },
+      data: { costoPresupuestado: monto },
+    });
+
+    return { success: true };
+  }
+
+  async inyectarPresupuestoMateriales(proyectoId: string, monto: number, motivo: string, usuario: string) {
+    const proyecto = await this.prisma.proyecto.findUnique({ where: { id: proyectoId } });
+    if (!proyecto) throw new NotFoundException('Proyecto no encontrado');
+
+    const inyeccionesExistentes = await this.prisma.historialCambio.findMany({
+      where: { proyectoId, campo: 'INYECCION_PRESUPUESTO' }
+    });
+    
+    const presupuestoActual = inyeccionesExistentes.reduce((sum, item) => sum + Number(item.valorNuevo), 0);
+    const limiteGasto = Number(proyecto.ventaContratada) * 0.60;
+    
+    if (presupuestoActual + monto > limiteGasto) {
+      throw new BadRequestException(`El monto supera el límite del 60% del valor de venta del proyecto.`);
+    }
+
+    await this.prisma.historialCambio.create({
+      data: {
+        proyectoId,
+        campo: 'INYECCION_PRESUPUESTO',
+        valorAnterior: motivo,
+        valorNuevo: String(monto),
+        usuario: usuario,
+        area: Area.LogisticaYRecursos
+      }
+    });
+
+    const inyecciones = await this.prisma.historialCambio.findMany({
+      where: { proyectoId, campo: 'INYECCION_PRESUPUESTO' }
+    });
+    
+    const totalPresupuesto = inyecciones.reduce((sum, item) => sum + Number(item.valorNuevo), 0);
+
+    await this.prisma.proyecto.update({
+      where: { id: proyectoId },
+      data: { costoPresupuestado: totalPresupuesto },
+    });
+
+    return { success: true, totalPresupuesto };
+  }
+
+  async getHistorialPresupuesto(proyectoId: string) {
+    const inyecciones = await this.prisma.historialCambio.findMany({
+      where: { proyectoId, campo: 'INYECCION_PRESUPUESTO' },
+      orderBy: { fecha: 'desc' }
+    });
+    
+    return inyecciones.map(i => ({
+      id: i.id,
+      monto: Number(i.valorNuevo),
+      motivo: i.valorAnterior || 'Sin motivo',
+      fecha: i.fecha,
+      usuario: i.usuario
+    }));
+  }
+
+  async eliminarInyeccionPresupuesto(proyectoId: string, inyeccionId: string) {
+    const inyeccion = await this.prisma.historialCambio.findFirst({
+      where: { id: inyeccionId, proyectoId, campo: 'INYECCION_PRESUPUESTO' }
+    });
+    
+    if (!inyeccion) throw new NotFoundException('Registro de inyección no encontrado');
+
+    await this.prisma.historialCambio.delete({
+      where: { id: inyeccionId }
+    });
+
+    const inyecciones = await this.prisma.historialCambio.findMany({
+      where: { proyectoId, campo: 'INYECCION_PRESUPUESTO' }
+    });
+    
+    const totalPresupuesto = inyecciones.reduce((sum, item) => sum + Number(item.valorNuevo), 0);
+
+    await this.prisma.proyecto.update({
+      where: { id: proyectoId },
+      data: { costoPresupuestado: totalPresupuesto },
+    });
+
+    return { success: true, totalPresupuesto };
   }
 }

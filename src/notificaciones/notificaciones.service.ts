@@ -136,4 +136,10 @@ export class NotificacionesService {
       );
     }
   }
+
+  async delete(id: string) {
+    return this.prisma.notificacion.delete({
+      where: { id },
+    });
+  }
 }

@@ -90,4 +90,8 @@ export class CreateFacturaDto {
   @IsUUID()
   @IsOptional()
   cajaId?: string;
+
+  @IsUUID()
+  @IsOptional()
+  hitoPagoId?: string | null;
 }

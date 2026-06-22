@@ -88,4 +88,8 @@ export class CreateCotizacionDto {
   @ValidateNested({ each: true })
   @Type(() => CreateHitoPagoDto)
   hitos?: CreateHitoPagoDto[];
+
+  @IsOptional()
+  @IsString()
+  liderId?: string;
 }

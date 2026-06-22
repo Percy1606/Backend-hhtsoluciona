@@ -11,7 +11,12 @@ import {
   Query,
   Req,
   BadRequestException,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import * as path from 'path';
 import { FinanzasService } from './finanzas.service';
 import { CashFlowService } from './cash-flow.service';
 import { AuthService } from '../auth/auth.service';
@@ -207,7 +212,7 @@ export class FinanzasController {
 
   @Get('gastos')
   @UseGuards(ModulesGuard)
-  @Modules('finanzas')
+  @Modules('finanzas', 'operaciones')
   findAllGastos(
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '20',
@@ -228,7 +233,7 @@ export class FinanzasController {
 
   @Post('gastos')
   @UseGuards(ModulesGuard)
-  @Modules('finanzas')
+  @Modules('finanzas', 'operaciones')
   createGasto(@Req() req: any, @Body() dto: CreateGastoDto) {
     const usuarioId = req.user.id || req.user.sub || 'system';
     return this.finanzasService.createGasto(dto, usuarioId);
@@ -501,5 +506,190 @@ export class FinanzasController {
       usuarioId,
       id,
     );
+  }
+
+  // ============================================
+  // BANDEJA FINANZAS (Fase 3)
+  // ============================================
+
+  @Get('bandeja-proyectos')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  getProyectosPendientesFinanzas() {
+    return this.finanzasService.getProyectosPendientesFinanzas();
+  }
+
+  @Patch('bandeja-proyectos/:id')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  updateEstadoFinanciero(
+    @Param('id') id: string,
+    @Body('estadoFinanciero') estadoFinanciero: string,
+    @Body('autorizaCompras') autorizaCompras: boolean,
+  ) {
+    return this.finanzasService.updateEstadoFinanciero(
+      id,
+      estadoFinanciero,
+      autorizaCompras ?? false,
+    );
+  }
+
+  @Get('bandeja-proyectos/:id/detalle')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas', 'operaciones')
+  getProyectoFinanzasDetalle(@Param('id') id: string) {
+    return this.finanzasService.getProyectoFinanzasDetalle(id);
+  }
+
+  @Post('bandeja-proyectos/:id/facturar')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  crearFacturaDesdeBandeja(
+    @Param('id') id: string,
+    @Body() dto: { hitoId?: string; monto: number; descripcion: string; fechaVencimiento: string },
+    @Req() req: any,
+  ) {
+    const usuarioId = req.user?.id || 'SISTEMA';
+    return this.finanzasService.crearFacturaDesdeBandeja(id, dto, usuarioId);
+  }
+
+  @Post('bandeja-proyectos/:id/pagar')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  registrarPagoBandeja(
+    @Param('id') id: string,
+    @Body() dto: { facturaId: string; cajaId: string; monto: number; referencia: string; comprobanteUrl?: string },
+    @Req() req: any,
+  ) {
+    const usuarioId = req.user?.id || 'SISTEMA';
+    return this.finanzasService.registrarPagoBandeja(id, dto, usuarioId);
+  }
+
+  @Post('bandeja-proyectos/:id/documentos')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: './uploads/finanzas',
+        filename: (req, file, cb) => {
+          const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+          const ext = path.extname(file.originalname);
+          cb(null, `${file.fieldname}-${uniqueSuffix}${ext}`);
+        },
+      }),
+    }),
+  )
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  async uploadDocumentoBandeja(
+    @Param('id') id: string,
+    @UploadedFile() file: any,
+    @Body('tipo') tipo: string,
+    @Req() req: any,
+  ) {
+    if (!file) throw new BadRequestException('No se adjuntó ningún archivo.');
+    const usuarioId = req.user?.id || 'SISTEMA';
+    const subidoPor = req.user?.nombre || 'Finanzas';
+    const url = `/uploads/finanzas/${file.filename}`;
+    
+    return this.finanzasService.adjuntarDocumentoBandeja(id, {
+      nombre: file.originalname,
+      url,
+      tipo: tipo || 'Voucher',
+      tamano: `${(file.size / 1024).toFixed(2)} KB`,
+      subidoPor,
+    });
+  }
+
+  @Delete('bandeja-proyectos/:id/documentos/:documentoId')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  async eliminarDocumentoBandeja(
+    @Param('id') id: string,
+    @Param('documentoId') documentoId: string,
+  ) {
+    return this.finanzasService.eliminarDocumentoBandeja(id, documentoId);
+  }
+
+  @Post('bandeja-proyectos/:id/hitos')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  crearHitoBandeja(
+    @Param('id') id: string,
+    @Body() dto: { monto: number; descripcion: string },
+  ) {
+    return this.finanzasService.crearHitoBandeja(id, dto);
+  }
+
+  @Patch('bandeja-proyectos/:id/hitos/:hitoId')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  actualizarHitoBandeja(
+    @Param('id') id: string,
+    @Param('hitoId') hitoId: string,
+    @Body() dto: { monto: number; descripcion: string },
+  ) {
+    return this.finanzasService.actualizarHitoBandeja(id, hitoId, dto);
+  }
+
+  @Delete('bandeja-proyectos/:id/hitos/:hitoId')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  eliminarHitoBandeja(
+    @Param('id') id: string,
+    @Param('hitoId') hitoId: string,
+  ) {
+    return this.finanzasService.eliminarHitoBandeja(id, hitoId);
+  }
+
+  @Patch('bandeja-proyectos/:id/venta-contratada')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  actualizarVentaContratada(
+    @Param('id') id: string,
+    @Body('monto') monto: number,
+  ) {
+    return this.finanzasService.actualizarVentaContratada(id, monto);
+  }
+
+  @Patch('bandeja-proyectos/:id/costo-presupuestado')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  actualizarCostoPresupuestado(
+    @Param('id') id: string,
+    @Body('monto') monto: number,
+  ) {
+    return this.finanzasService.actualizarCostoPresupuestado(id, monto);
+  }
+
+  @Post('bandeja-proyectos/:id/inyeccion-presupuesto')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  inyectarPresupuestoMateriales(
+    @Param('id') id: string,
+    @Body('monto') monto: number,
+    @Body('motivo') motivo: string,
+    @Req() req: any,
+  ) {
+    const usuario = req.user?.nombre || req.user?.email || 'Sistema';
+    return this.finanzasService.inyectarPresupuestoMateriales(id, monto, motivo, usuario);
+  }
+
+  @Get('bandeja-proyectos/:id/inyecciones-presupuesto')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  getHistorialPresupuesto(
+    @Param('id') id: string,
+  ) {
+    return this.finanzasService.getHistorialPresupuesto(id);
+  }
+
+  @Delete('bandeja-proyectos/:id/inyecciones-presupuesto/:inyeccionId')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  eliminarInyeccionPresupuesto(
+    @Param('id') id: string,
+    @Param('inyeccionId') inyeccionId: string,
+  ) {
+    return this.finanzasService.eliminarInyeccionPresupuesto(id, inyeccionId);
   }
 }

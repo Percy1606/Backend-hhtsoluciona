@@ -4,6 +4,7 @@ import {
   Param,
   Put,
   Post,
+  Delete,
   Body,
   UseGuards,
   Req,
@@ -156,5 +157,11 @@ export class NotificacionesController {
   async create(@Body() data: any) {
     console.log('POST /notificaciones called with data:', data);
     return this.notificacionesService.create(data);
+  }
+
+  @Delete('/:id')
+  @UseGuards(JwtAuthGuard)
+  delete(@Param('id') id: string) {
+    return this.notificacionesService.delete(id);
   }
 }

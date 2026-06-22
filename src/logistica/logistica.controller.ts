@@ -34,6 +34,14 @@ export class LogisticaController {
   ) {}
 
   // ============================================
+  // BANDEJA LOGÍSTICA
+  // ============================================
+  @Get('bandeja-proyectos')
+  async getBandejaProyectos() {
+    return this.logisticaService.getProyectosPendientesLogistica();
+  }
+
+  // ============================================
   // PROVEEDORES
   // ============================================
   @Post('proveedores')
@@ -42,6 +50,7 @@ export class LogisticaController {
   }
 
   @Get('proveedores')
+  @Modules('logistica', 'finanzas', 'operaciones')
   findAllProveedores() {
     return this.logisticaService.findAllProveedores();
   }
@@ -207,5 +216,10 @@ export class LogisticaController {
   @Get('proyecto/:id/movimientos')
   findMovimientosByProyecto(@Param('id') id: string) {
     return this.logisticaService.findMovimientosByProyecto(id);
+  }
+
+  @Get('presupuesto/:proyectoId')
+  async getPresupuestoProyecto(@Param('proyectoId') proyectoId: string) {
+    return this.logisticaService.getPresupuestoProyecto(proyectoId);
   }
 }

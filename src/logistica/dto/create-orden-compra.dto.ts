@@ -40,6 +40,14 @@ export class CreateOrdenCompraDto {
   @IsString()
   observaciones?: string;
 
+  @IsOptional()
+  @IsString()
+  estado?: string;
+
+  @IsOptional()
+  @IsString()
+  archivoFactura?: string;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => OrdenItemDto)

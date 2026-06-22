@@ -43,7 +43,7 @@ export class CashFlowService {
         where: {
           estado: 'PENDIENTE',
           fechaEstimada: { lte: limitDate },
-          cotizacion: { estado: { in: ['Aprobado', 'Aprobada'] } }
+          cotizacion: { estado: { in: ['Aprobado', 'Aprobada', 'Ganada'] } }
         },
         select: { monto: true }
       });
