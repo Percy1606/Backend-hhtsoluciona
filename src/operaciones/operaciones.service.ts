@@ -547,6 +547,12 @@ export class OperacionesService {
         },
       });
 
+      // Vincular los documentos de la cotización al nuevo proyecto
+      await this.prisma.documento.updateMany({
+        where: { cotizacionId: cotizacionId },
+        data: { proyectoId: newProyectoId },
+      });
+
       if (user) {
         await this.auditoriaService.createLog({
           usuarioId: user.id,

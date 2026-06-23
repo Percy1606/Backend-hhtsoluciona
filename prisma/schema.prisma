@@ -1227,6 +1227,33 @@ model Rendicion {
 }
 
 // ============================================
+// PERSONAL DE OBRA (Logística)
+// ============================================
+
+model PersonalProyecto {
+  id              String   @id @default(uuid())
+  proyectoId      String
+  proyectoCodigo  String?
+  proyectoNombre  String?
+  nombre          String
+  documento       String?
+  rol             String   // Tecnico | Operario | Supervisor | Otro
+  tipoContrato    String   // Jornal | Semanal | Mensual
+  montoDiario     Decimal  @default(0) @db.Decimal(18, 2)
+  fechaInicio     DateTime @default(now())
+  fechaFin        DateTime?
+  activo          Boolean  @default(true)
+  observaciones   String?  @db.Text
+  creadoPor       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([proyectoId], map: "personal_proyecto_proyectoId_fkey")
+  @@index([activo], map: "personal_proyecto_activo_idx")
+  @@map("personal_proyecto")
+}
+
+// ============================================
 // ORDEN DE SERVICIO (nuevo — Fase 1)
 // ============================================
 

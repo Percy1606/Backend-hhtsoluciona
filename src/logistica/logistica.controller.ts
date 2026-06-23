@@ -16,6 +16,7 @@ import { LogisticaService } from './logistica.service';
 import { CreateInsumoDto } from './dto/create-insumo.dto';
 import { CreateProveedorDto } from './dto/create-proveedor.dto';
 import { CreateOrdenCompraDto } from './dto/create-orden-compra.dto';
+import { CreatePersonalDto, UpdatePersonalDto } from './dto/create-personal.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ModulesGuard } from '../auth/modules.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -216,6 +217,88 @@ export class LogisticaController {
   @Get('proyecto/:id/movimientos')
   findMovimientosByProyecto(@Param('id') id: string) {
     return this.logisticaService.findMovimientosByProyecto(id);
+  }
+
+  // ============================================
+  // PERSONAL DE OBRA
+  // ============================================
+  @Post('personal')
+  createPersonal(@Body() dto: CreatePersonalDto, @Req() req: any) {
+    return this.logisticaService.createPersonal(dto, req.user.id);
+  }
+
+  @Get('personal')
+  findAllPersonal(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('proyectoId') proyectoId?: string,
+    @Query('activo') activo?: string,
+    @Query('search') search?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+  ) {
+    return this.logisticaService.findAllPersonal(
+      page ? parseInt(page) : 1,
+      limit ? parseInt(limit) : 50,
+      proyectoId,
+      activo,
+      search,
+      dateFrom,
+      dateTo,
+    );
+  }
+
+  @Get('personal/proyecto/:proyectoId')
+  findPersonalByProyecto(@Param('proyectoId') proyectoId: string) {
+    return this.logisticaService.findPersonalByProyecto(proyectoId);
+  }
+
+  @Put('personal/:id')
+  updatePersonal(@Param('id') id: string, @Body() dto: UpdatePersonalDto) {
+    return this.logisticaService.updatePersonal(id, dto);
+  }
+
+  @Delete('personal/:id')
+  removePersonal(@Param('id') id: string) {
+    return this.logisticaService.removePersonal(id);
+  }
+
+  // ============================================
+  // COMPROMISO FINANCIERO DE MANO DE OBRA
+  // ============================================
+
+  @Post('personal/:id/comprometer')
+  async generarCompromisoPersonal(
+    @Param('id') id: string,
+    @Body('diasTrabajo') diasTrabajo: number,
+    @Body('cajaId') cajaId: string | undefined,
+    @Req() req: any,
+  ) {
+    if (!diasTrabajo || diasTrabajo <= 0) {
+      throw new BadRequestException('diasTrabajo debe ser mayor a cero');
+    }
+    return this.logisticaService.generarCompromisoPersonal(
+      id,
+      diasTrabajo,
+      req.user.id,
+      cajaId,
+    );
+  }
+
+  @Post('personal/comprometer-proyecto/:proyectoId')
+  async generarCompromisoPersonalPorProyecto(
+    @Param('proyectoId') proyectoId: string,
+    @Req() req: any,
+  ) {
+    return this.logisticaService.generarCompromisoPersonalPorProyecto(
+      proyectoId,
+      req.user.id,
+    );
+  }
+
+  @Get('personal/costos/:proyectoId')
+  getCostosPersonalProyecto(@Param('proyectoId') proyectoId: string) {
+    return this.logisticaService.getCostosPersonalProyecto(proyectoId);
   }
 
   @Get('presupuesto/:proyectoId')

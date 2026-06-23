@@ -9,6 +9,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CreateInsumoDto } from './dto/create-insumo.dto';
 import { CreateProveedorDto } from './dto/create-proveedor.dto';
 import { CreateOrdenCompraDto } from './dto/create-orden-compra.dto';
+import { CreatePersonalDto, UpdatePersonalDto } from './dto/create-personal.dto';
 import {
   TipoMovimiento,
   EstadoCompra,
@@ -711,6 +712,311 @@ export class LogisticaService {
       saldoDisponible,
       porcentajeConsumido,
       autorizaCompras: proyecto.autorizaCompras
+    };
+  }
+
+  // ============================================
+  // PERSONAL DE OBRA
+  // ============================================
+
+  async createPersonal(dto: CreatePersonalDto, userId: string) {
+    return this.prisma.personalProyecto.create({
+      data: {
+        proyectoId: dto.proyectoId,
+        proyectoCodigo: dto.proyectoCodigo,
+        proyectoNombre: dto.proyectoNombre,
+        nombre: dto.nombre,
+        documento: dto.documento,
+        rol: dto.rol,
+        tipoContrato: dto.tipoContrato,
+        montoDiario: dto.montoDiario,
+        fechaInicio: dto.fechaInicio ? new Date(dto.fechaInicio) : new Date(),
+        fechaFin: dto.fechaFin ? new Date(dto.fechaFin) : null,
+        activo: dto.activo ?? true,
+        observaciones: dto.observaciones,
+        creadoPor: userId,
+      },
+    });
+  }
+
+  async findAllPersonal(
+    page: number = 1,
+    limit: number = 50,
+    proyectoId?: string,
+    activo?: string,
+    search?: string,
+    dateFrom?: string,
+    dateTo?: string,
+  ) {
+    const skip = (page - 1) * limit;
+    const where: any = {};
+
+    if (proyectoId) {
+      where.proyectoId = proyectoId;
+    }
+
+    if (activo && activo !== 'all') {
+      where.activo = activo === 'true';
+    }
+
+    if (search) {
+      where.OR = [
+        { nombre: { contains: search } },
+        { documento: { contains: search } },
+        { proyectoNombre: { contains: search } },
+      ];
+    }
+
+    if (dateFrom || dateTo) {
+      where.createdAt = {};
+      if (dateFrom) {
+        where.createdAt.gte = new Date(dateFrom);
+      }
+      if (dateTo) {
+        const toDate = new Date(dateTo);
+        toDate.setHours(23, 59, 59, 999);
+        where.createdAt.lte = toDate;
+      }
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.personalProyecto.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.personalProyecto.count({ where }),
+    ]);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async findPersonalByProyecto(proyectoId: string) {
+    return this.prisma.personalProyecto.findMany({
+      where: { proyectoId, activo: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async updatePersonal(id: string, dto: UpdatePersonalDto) {
+    const personal = await this.prisma.personalProyecto.findUnique({
+      where: { id },
+    });
+    if (!personal) throw new NotFoundException('Personal no encontrado');
+
+    return this.prisma.personalProyecto.update({
+      where: { id },
+      data: {
+        ...dto,
+        fechaInicio: dto.fechaInicio ? new Date(dto.fechaInicio) : undefined,
+        fechaFin: dto.fechaFin ? new Date(dto.fechaFin) : undefined,
+      },
+    });
+  }
+
+  async removePersonal(id: string) {
+    const personal = await this.prisma.personalProyecto.findUnique({
+      where: { id },
+    });
+    if (!personal) throw new NotFoundException('Personal no encontrado');
+
+    return this.prisma.personalProyecto.delete({ where: { id } });
+  }
+
+  // ============================================
+  // COMPROMISO FINANCIERO DE MANO DE OBRA
+  // ============================================
+
+  async generarCompromisoPersonal(
+    personalId: string,
+    diasTrabajo: number,
+    userId: string,
+    cajaId?: string,
+  ) {
+    const personal = await this.prisma.personalProyecto.findUnique({
+      where: { id: personalId },
+    });
+    if (!personal) throw new NotFoundException('Personal no encontrado');
+    if (!personal.activo) throw new BadRequestException('El personal no está activo');
+
+    const montoTotal = Number(personal.montoDiario) * diasTrabajo;
+    if (montoTotal <= 0) throw new BadRequestException('El monto calculado debe ser mayor a cero');
+
+    // Validar presupuesto del proyecto si aplica
+    if (personal.proyectoId) {
+      await this.validarReglasFinancieras(personal.proyectoId, montoTotal);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const gasto = await tx.gasto.create({
+        data: {
+          codigo: `MO-${Date.now().toString().slice(-6)}`,
+          proyectoId: personal.proyectoId,
+          cajaId: cajaId || null,
+          tipo: TipoGasto.PERSONAL,
+          clasificacion: ClasificacionFinanciera.PROYECTO,
+          categoriaDistribucion: CategoriaDistribucion.MANO_OBRA,
+          concepto: `Mano de Obra: ${personal.nombre} - ${personal.rol} - ${diasTrabajo} días`,
+          montoTotal: montoTotal,
+          saldoPendiente: montoTotal,
+          estado: EstadoGasto.SOLICITADO,
+          nivelAprobacion: 'PENDIENTE_FINANZAS',
+          solicitanteId: userId,
+          area: 'LogisticaYRecursos',
+          fechaEmision: new Date(),
+          registradoPorId: userId,
+        } as any,
+      });
+
+      if (personal.proyectoId) {
+        this.eventEmitter.emit('proyecto.costChanged', {
+          proyectoId: personal.proyectoId,
+        });
+      }
+
+      return {
+        gasto,
+        personal: personal.nombre,
+        costoTotal: montoTotal,
+        dias: diasTrabajo,
+      };
+    });
+  }
+
+  async generarCompromisoPersonalPorProyecto(proyectoId: string, userId: string) {
+    // Encontrar todo el personal activo del proyecto
+    const workers = await this.prisma.personalProyecto.findMany({
+      where: { proyectoId, activo: true },
+    });
+
+    if (workers.length === 0) {
+      throw new BadRequestException('No hay personal activo en este proyecto para comprometer');
+    }
+
+    // Calcular costo total sumando el costo de cada trabajador según su tipo de contrato
+    let montoTotal = 0;
+    const detalles: string[] = [];
+
+    for (const w of workers) {
+      const diario = Number(w.montoDiario);
+      let dias: number;
+      if (w.fechaFin && w.fechaInicio) {
+        const diff = new Date(w.fechaFin).getTime() - new Date(w.fechaInicio).getTime();
+        dias = Math.max(1, Math.ceil(diff / (1000 * 60 * 60 * 24)) + 1);
+      } else if (w.tipoContrato === 'Semanal') {
+        dias = 6;
+      } else if (w.tipoContrato === 'Mensual') {
+        dias = 26;
+      } else {
+        dias = 1;
+      }
+      const costo = Math.round(diario * dias * 100) / 100;
+      montoTotal += costo;
+      detalles.push(`${w.nombre} (${w.rol}): ${dias}d × S/ ${diario.toFixed(2)} = S/ ${costo.toFixed(2)}`);
+    }
+
+    montoTotal = Math.round(montoTotal * 100) / 100;
+
+    if (montoTotal <= 0) {
+      throw new BadRequestException('El monto calculado debe ser mayor a cero');
+    }
+
+    // Validar presupuesto del proyecto
+    await this.validarReglasFinancieras(proyectoId, montoTotal);
+
+    return this.prisma.$transaction(async (tx) => {
+      const gasto = await tx.gasto.create({
+        data: {
+          codigo: `MO-${proyectoId.slice(0, 4).toUpperCase()}-${Date.now().toString().slice(-4)}`,
+          proyectoId,
+          cajaId: null,
+          tipo: TipoGasto.PERSONAL,
+          clasificacion: ClasificacionFinanciera.PROYECTO,
+          categoriaDistribucion: CategoriaDistribucion.MANO_OBRA,
+          concepto: `Mano de Obra: ${workers.length} trabajadores - Proyecto`,
+          montoTotal,
+          saldoPendiente: montoTotal,
+          estado: EstadoGasto.SOLICITADO,
+          nivelAprobacion: 'PENDIENTE_FINANZAS',
+          solicitanteId: userId,
+          area: 'LogisticaYRecursos',
+          fechaEmision: new Date(),
+          registradoPorId: userId,
+        } as any,
+      });
+
+      this.eventEmitter.emit('proyecto.costChanged', {
+        proyectoId,
+      });
+
+      return {
+        gasto,
+        totalTrabajadores: workers.length,
+        costoTotal: montoTotal,
+        detalles,
+      };
+    });
+  }
+
+  async getCostosPersonalProyecto(proyectoId: string) {
+    const personal = await this.prisma.personalProyecto.findMany({
+      where: { proyectoId },
+    });
+
+    // Gastos tipo PERSONAL vinculados a este proyecto
+    const gastos = await this.prisma.gasto.findMany({
+      where: {
+        proyectoId,
+        tipo: TipoGasto.PERSONAL,
+        estado: { not: EstadoGasto.ANULADO },
+      },
+      orderBy: { fechaEmision: 'desc' },
+    });
+
+    const costoDiario = personal
+      .filter((p) => p.activo)
+      .reduce((sum, p) => sum + Number(p.montoDiario), 0);
+
+    const costoTotalComprometido = gastos
+      .filter((g) => g.estado === EstadoGasto.SOLICITADO || g.estado === EstadoGasto.PENDIENTE || g.estado === EstadoGasto.APROBADO)
+      .reduce((sum, g) => sum + Number(g.montoTotal), 0);
+
+    const costoTotalPagado = gastos
+      .filter((g) => g.estado === EstadoGasto.PAGADO)
+      .reduce((sum, g) => sum + Number(g.montoTotal), 0);
+
+    return {
+      proyectoId,
+      totalTrabajadores: personal.length,
+      trabajadoresActivos: personal.filter((p) => p.activo).length,
+      costoDiarioTotal: costoDiario,
+      costoTotalComprometido,
+      costoTotalPagado,
+      costoTotalAcumulado: costoTotalComprometido + costoTotalPagado,
+      gastos: gastos.map((g) => ({
+        id: g.id,
+        codigo: g.codigo,
+        concepto: g.concepto,
+        monto: Number(g.montoTotal),
+        estado: g.estado,
+        nivelAprobacion: g.nivelAprobacion,
+        fecha: g.fechaEmision,
+      })),
+      personal: personal.map((p) => ({
+        id: p.id,
+        nombre: p.nombre,
+        rol: p.rol,
+        tipoContrato: p.tipoContrato,
+        montoDiario: Number(p.montoDiario),
+        activo: p.activo,
+      })),
     };
   }
 

@@ -320,6 +320,19 @@ export class CotizacionesService {
       });
     }
 
+    // Si la cotización ya tiene un proyecto generado y se provee liderId, actualizamos el líder del proyecto
+    if (liderId) {
+      const proyecto = await this.prisma.proyecto.findFirst({
+        where: { cotizacionOrigen: { id: id } }
+      });
+      if (proyecto) {
+        await this.prisma.proyecto.update({
+          where: { id: proyecto.id },
+          data: { responsablePrincipalId: liderId }
+        });
+      }
+    }
+
     return updated;
   }
 
@@ -329,63 +342,62 @@ export class CotizacionesService {
   private async autoGenerarDesdeGanada(cotizacion: any, user?: any, liderId?: string) {
     console.log(`[AutoGen] Iniciando generación automática para cotización ${cotizacion.codigo}`);
 
-    // Validación: debe tener PDF adjunto
-    const documentos = await this.prisma.documento.findMany({
-      where: { cotizacionId: cotizacion.id },
-    });
-    if (!documentos || documentos.length === 0) {
-      console.warn(`[AutoGen] Cotización ${cotizacion.codigo} sin documentos adjuntos. Proyecto no generado automáticamente.`);
-      return;
-    }
-
-    // Validación: no generar si ya tiene proyecto
-    if (cotizacion.proyectoGeneradoId) {
-      console.log(`[AutoGen] Cotización ${cotizacion.codigo} ya tiene proyecto generado. Omitiendo.`);
-      return;
-    }
-
-    // Validación: cliente sin proyecto activo
-    const proyectoActivo = await this.prisma.proyecto.findFirst({
-      where: {
-        clientId: cotizacion.clientId,
-        estado: { not: 'Finalizado' },
-      },
-    });
-    if (proyectoActivo) {
-      console.warn(`[AutoGen] Cliente ya tiene proyecto activo (${proyectoActivo.codigo}). Proyecto no generado automáticamente.`);
-      // Notificar al admin del bloqueo
-      const admins = await this.prisma.usuario.findMany({ where: { rol: 'ADMIN' } });
-      for (const admin of admins) {
-        await this.notificacionesService.create({
-          usuarioId: admin.id,
-          titulo: '⚠️ Proyecto no generado automáticamente',
-          mensaje: `La cotización ${cotizacion.codigo} fue ganada, pero el cliente ya tiene el proyecto activo "${proyectoActivo.nombre}". Genera el proyecto manualmente cuando corresponda.`,
-          tipo: 'SISTEMA',
-        });
-      }
-      return;
-    }
-
-    // Obtener responsable por defecto o el asignado
-    const responsablePorDefecto = liderId 
-      ? await this.prisma.responsable.findUnique({ where: { id: liderId } })
-      : await this.prisma.responsable.findFirst({
-          where: { activo: true },
-          orderBy: { id: 'asc' },
-        });
-    if (!responsablePorDefecto) {
-      console.error('[AutoGen] No hay responsables activos en el sistema. Proyecto no generado.');
-      return;
-    }
-
-    const proyectoId = uuidv4();
-    const projectCode = await this.generateProyectoCodigo();
-    const osCode = await this.generateOsCodigo();
-    const hoy = new Date();
-    const en30Dias = new Date(hoy);
-    en30Dias.setDate(en30Dias.getDate() + 30);
-
     try {
+      // Solo advertir si no hay documentos, pero NO bloquear la creación del proyecto
+      const documentos = await this.prisma.documento.findMany({
+        where: { cotizacionId: cotizacion.id },
+      });
+      if (!documentos || documentos.length === 0) {
+        console.warn(`[AutoGen] Cotización ${cotizacion.codigo} sin documentos adjuntos. El proyecto se generará igualmente.`);
+      }
+
+      // Validación: no generar si ya tiene proyecto
+      if (cotizacion.proyectoGeneradoId) {
+        console.log(`[AutoGen] Cotización ${cotizacion.codigo} ya tiene proyecto generado. Omitiendo.`);
+        return;
+      }
+
+      // Validación: cliente sin proyecto activo
+      const proyectoActivo = await this.prisma.proyecto.findFirst({
+        where: {
+          clientId: cotizacion.clientId,
+          estado: { not: 'Finalizado' },
+        },
+      });
+      if (proyectoActivo) {
+        console.warn(`[AutoGen] Cliente ya tiene proyecto activo (${proyectoActivo.codigo}). Proyecto no generado automáticamente.`);
+        // Notificar al admin del bloqueo
+        const admins = await this.prisma.usuario.findMany({ where: { rol: 'ADMIN' } });
+        for (const admin of admins) {
+          await this.notificacionesService.create({
+            usuarioId: admin.id,
+            titulo: '⚠️ Proyecto no generado automáticamente',
+            mensaje: `La cotización ${cotizacion.codigo} fue ganada, pero el cliente ya tiene el proyecto activo "${proyectoActivo.nombre}". Genera el proyecto manualmente cuando corresponda.`,
+            tipo: 'SISTEMA',
+          });
+        }
+        return;
+      }
+
+      // Obtener responsable por defecto o el asignado
+      const responsablePorDefecto = liderId 
+        ? await this.prisma.responsable.findUnique({ where: { id: liderId } })
+        : await this.prisma.responsable.findFirst({
+            where: { activo: true },
+            orderBy: { id: 'asc' },
+          });
+      if (!responsablePorDefecto) {
+        console.error('[AutoGen] No hay responsables activos en el sistema. Proyecto no generado.');
+        return;
+      }
+
+      const proyectoId = uuidv4();
+      const projectCode = await this.generateProyectoCodigo();
+      const osCode = await this.generateOsCodigo();
+      const hoy = new Date();
+      const en30Dias = new Date(hoy);
+      en30Dias.setDate(en30Dias.getDate() + 30);
+
       await this.prisma.$transaction(async (tx) => {
         // 1. Crear Proyecto
         const proyecto = await tx.proyecto.create({
@@ -415,6 +427,12 @@ export class CotizacionesService {
             creadoPor: user?.nombre || 'SISTEMA',
             cotizacionOrigen: { connect: { id: cotizacion.id } },
           },
+        });
+
+        // Vincular los documentos de la cotización al nuevo proyecto (si existen)
+        await tx.documento.updateMany({
+          where: { cotizacionId: cotizacion.id },
+          data: { proyectoId: proyecto.id },
         });
 
         // 2. Crear Orden de Servicio
@@ -495,9 +513,7 @@ export class CotizacionesService {
             mensaje: `Se ganó la cotización ${cotizacion.codigo} del cliente ${cotizacionConCliente?.cliente?.empresa || ''}. Proyecto ${projectCode} listo en Finanzas y Logística.`,
             tipo: 'SISTEMA',
           });
-        }
-
-        if (esOperaciones) {
+        } else if (esOperaciones) {
           await this.notificacionesService.create({
             usuarioId: u.id,
             titulo: '🛠️ Nuevo Proyecto Asignado',
@@ -507,8 +523,7 @@ export class CotizacionesService {
         }
       }
     } catch (err) {
-      console.error(`[AutoGen] ❌ Error en transacción:`, err);
-      throw err;
+      console.error(`[AutoGen] ❌ Error en auto-generación:`, err);
     }
   }
 

@@ -598,7 +598,7 @@ export class CrmService {
   }
 
   async createDocumento(dto: any) {
-    const { clientId, cotizacionId, ...data } = dto;
+    const { clientId, cotizacionId, area, ...data } = dto;
 
     // Normalización para Prisma Enums
     const tipo =
@@ -617,13 +617,23 @@ export class CrmService {
 
     const connectData: any = {};
     if (clientId) connectData.cliente = { connect: { id: clientId } };
-    if (cotizacionId) connectData.cotizacion = { connect: { id: cotizacionId } };
+    if (cotizacionId) {
+      connectData.cotizacion = { connect: { id: cotizacionId } };
+      const cot = await this.prisma.cotizacion.findUnique({
+        where: { id: cotizacionId },
+        select: { proyectoGeneradoId: true },
+      });
+      if (cot?.proyectoGeneradoId) {
+        connectData.proyecto = { connect: { id: cot.proyectoGeneradoId } };
+      }
+    }
 
     return this.prisma.documento.create({
       data: {
         ...data,
         tipo: tipo,
         estado: estado,
+        area: area || undefined,
         ...connectData,
       },
     });
