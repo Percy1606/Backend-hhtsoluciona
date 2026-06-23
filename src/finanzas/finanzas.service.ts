@@ -1954,7 +1954,7 @@ export class FinanzasService {
           const gastos = await tx.gasto.findMany({
             where: { 
               proyectoId: dbGasto.proyecto.id, 
-              estado: { in: ['APROBADO', 'PAGADO', 'PAGO_PARCIAL'] },
+              estado: { in: ['APROBADO', 'PAGADO'] },
               id: { not: refId } // Excluir este mismo gasto
             }
           });
@@ -2080,7 +2080,7 @@ export class FinanzasService {
           const gastos = await tx.gasto.findMany({
             where: { 
               proyectoId: dbGasto.proyecto.id, 
-              estado: { in: ['APROBADO', 'PAGADO', 'PAGO_PARCIAL'] },
+              estado: { in: ['APROBADO', 'PAGADO'] },
               id: { not: refId } // Excluir este mismo gasto
             }
           });
