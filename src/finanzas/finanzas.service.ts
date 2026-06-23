@@ -669,7 +669,7 @@ export class FinanzasService {
     const pagosFactura = factura.pagos;
 
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. REVERTIR SALDO EN CAJA por cada pago (conserva historial de pagos)
+      // 1. REVERTIR SALDO EN CAJA por cada pago (descuenta el monto cobrado)
       for (const pago of pagosFactura) {
         const dbCaja = await tx.caja.findUnique({ where: { id: pago.cajaId } });
         if (dbCaja) {
@@ -681,24 +681,28 @@ export class FinanzasService {
               saldoDisponible: nuevoReal - Number(dbCaja.saldoComprometido),
             },
           });
-          await tx.transaccionCaja.create({
-            data: {
-              cajaId: pago.cajaId,
-              tipo: 'EGRESO' as any,
-              monto: Number(pago.monto),
-              concepto: `ANULACIÓN Factura: ${factura.codigo}${motivo ? ` - MOTIVO: ${motivo}` : ''}`,
-              referenciaTipo: 'FACTURA',
-              referenciaId: id,
-              usuarioId: 'system',
-              saldoRealPrevio: Number(dbCaja.saldoReal),
-              saldoRealNuevo: nuevoReal,
-            } as any,
-          });
         }
       }
 
-      // 2. MARCAR COMO ANULADA (pagos conservados en historial)
-      console.log(`[ANULACIÓN] Marcando factura como ANULADA (pagos preservados, caja revertida)...`);
+      // 2. ELIMINAR TRANSACCIONES DE CAJA asociadas de la auditoría de historial
+      console.log(`[ANULACIÓN] Eliminando transacciones de caja asociadas a la factura...`);
+      await tx.transaccionCaja.deleteMany({
+        where: {
+          referenciaId: id,
+          referenciaTipo: 'FACTURA',
+        },
+      });
+
+      // 3. ELIMINAR PAGOS ASOCIADOS a la factura
+      console.log(`[ANULACIÓN] Eliminando pagos asociados a la factura...`);
+      await tx.pago.deleteMany({
+        where: {
+          facturaId: id,
+        },
+      });
+
+      // 4. MARCAR COMO ANULADA
+      console.log(`[ANULACIÓN] Marcando factura como ANULADA...`);
       const updatedFactura = await tx.factura.update({
         where: { id },
         data: {
@@ -707,7 +711,7 @@ export class FinanzasService {
         },
       });
       console.log(
-        `[ANULACIÓN] Factura ${updatedFactura.codigo} marcada ANULADA. ${pagosFactura.length} pago(s) revertido(s) de caja.`,
+        `[ANULACIÓN] Factura ${updatedFactura.codigo} marcada ANULADA. Saldo de caja revertido y transacciones/pagos eliminados del historial.`,
       );
 
       return updatedFactura;
@@ -1081,7 +1085,7 @@ export class FinanzasService {
       .filter(Boolean);
 
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. REVERTIR SALDO EN CAJA por cada pago vinculado al gasto
+      // 1. REVERTIR SALDO EN CAJA por cada pago vinculado al gasto (se devuelve el dinero)
       for (const pago of gasto.pagos) {
         const dbCaja = await tx.caja.findUnique({ where: { id: pago.cajaId } });
         if (dbCaja) {
@@ -1093,26 +1097,24 @@ export class FinanzasService {
               saldoDisponible: nuevoReal - Number(dbCaja.saldoComprometido),
             },
           });
-          await tx.transaccionCaja.create({
-            data: {
-              cajaId: pago.cajaId,
-              tipo: 'INGRESO' as any, // Reversión de egreso es ingreso
-              monto: Number(pago.monto),
-              concepto: `ANULACIÓN Gasto: ${gasto.codigo}${motivo ? ` - MOTIVO: ${motivo}` : ''}`,
-              referenciaTipo: 'GASTO',
-              referenciaId: id,
-              usuarioId: usuarioId || 'system',
-              saldoRealPrevio: Number(dbCaja.saldoReal),
-              saldoRealNuevo: nuevoReal,
-            } as any,
-          });
         }
       }
 
-      // 2. ELIMINAR LOS REGISTROS DE PAGO
+      // 2. ELIMINAR TRANSACCIONES DE CAJA asociadas de la auditoría de historial
+      console.log(`[ANULACIÓN] Eliminando transacciones de caja asociadas al gasto...`);
+      await tx.transaccionCaja.deleteMany({
+        where: {
+          referenciaId: id,
+          referenciaTipo: 'GASTO',
+        },
+      });
+
+      // 3. ELIMINAR LOS REGISTROS DE PAGO
+      console.log(`[ANULACIÓN] Eliminando pagos asociados al gasto...`);
       await tx.pago.deleteMany({ where: { gastoId: id } });
 
-      // 3. MARCAR COMO ANULADO
+      // 4. MARCAR COMO ANULADO
+      console.log(`[ANULACIÓN] Marcando gasto como ANULADO...`);
       return tx.gasto.update({
         where: { id },
         data: {
