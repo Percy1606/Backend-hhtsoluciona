@@ -1761,44 +1761,38 @@ export class FinanzasService {
       const refType = transaccion.referenciaTipo;
       const refId = transaccion.referenciaId;
 
-      // SI ES FACTURA O GASTO, EL USUARIO NO QUIERE REVERTIR EL DINERO EN CAJA
-      // Solo quiere que el movimiento desaparezca y la factura/gasto se anule.
-      const isFacturaOrGasto = refType === 'FACTURA' || refType === 'GASTO';
+      // Revertir el efecto del saldo según el tipo de transacción en la caja
+      let nuevoReal = Number(dbCaja.saldoReal);
+      let nuevoComprometido = Number(dbCaja.saldoComprometido);
+      const tipo = transaccion.tipo as any;
 
-      if (!isFacturaOrGasto) {
-        // Revertir el efecto del saldo según el tipo de transacción (Solo para otros tipos)
-        let nuevoReal = Number(dbCaja.saldoReal);
-        let nuevoComprometido = Number(dbCaja.saldoComprometido);
-        const tipo = transaccion.tipo as any;
-
-        if (tipo === 'INGRESO') {
-          nuevoReal -= Number(transaccion.monto);
-        } else if (tipo === 'EGRESO') {
-          nuevoReal += Number(transaccion.monto);
-        } else if (tipo === 'AJUSTE') {
-          const diff =
-            Number(transaccion.saldoRealNuevo) -
-            Number(transaccion.saldoRealPrevio);
-          nuevoReal -= diff;
-        } else if (tipo === 'BLOQUEO') {
-          nuevoComprometido = Math.max(
-            0,
-            nuevoComprometido - Number(transaccion.monto),
-          );
-        } else if (tipo === 'LIBERACION') {
-          nuevoComprometido = nuevoComprometido + Number(transaccion.monto);
-        }
-
-        // Actualizar la caja con los saldos revertidos
-        await tx.caja.update({
-          where: { id: dbCaja.id },
-          data: {
-            saldoReal: nuevoReal,
-            saldoComprometido: nuevoComprometido,
-            saldoDisponible: nuevoReal - nuevoComprometido,
-          },
-        });
+      if (tipo === 'INGRESO') {
+        nuevoReal -= Number(transaccion.monto);
+      } else if (tipo === 'EGRESO') {
+        nuevoReal += Number(transaccion.monto);
+      } else if (tipo === 'AJUSTE') {
+        const diff =
+          Number(transaccion.saldoRealNuevo) -
+          Number(transaccion.saldoRealPrevio);
+        nuevoReal -= diff;
+      } else if (tipo === 'BLOQUEO') {
+        nuevoComprometido = Math.max(
+          0,
+          nuevoComprometido - Number(transaccion.monto),
+        );
+      } else if (tipo === 'LIBERACION') {
+        nuevoComprometido = nuevoComprometido + Number(transaccion.monto);
       }
+
+      // Actualizar la caja con los saldos revertidos
+      await tx.caja.update({
+        where: { id: dbCaja.id },
+        data: {
+          saldoReal: nuevoReal,
+          saldoComprometido: nuevoComprometido,
+          saldoDisponible: nuevoReal - nuevoComprometido,
+        },
+      });
 
       // 2. LÓGICA DE ELIMINACIÓN COORDINADA
       console.log(
