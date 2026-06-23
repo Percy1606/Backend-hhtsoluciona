@@ -19,9 +19,13 @@ export class NotificacionesService {
   ) {
     const skip = (page - 1) * limit;
 
-    // Si es ADMIN o SUPERVISOR, puede ver todas, si no, solo las suyas
-    const where: any =
-      rol === 'ADMIN' || rol === 'SUPERVISOR' ? {} : { usuarioId };
+    // Las notificaciones deben ser del usuario o globales
+    const where: any = {
+      OR: [
+        { usuarioId },
+        { esGlobal: true },
+      ],
+    };
 
     const [data, total] = await Promise.all([
       this.prisma.notificacion.findMany({
@@ -57,11 +61,13 @@ export class NotificacionesService {
   }
 
   async markAllAsRead(usuarioId: string, rol: string = 'USER') {
-    const where: any = { leida: false };
-
-    if (rol !== 'ADMIN' && rol !== 'SUPERVISOR') {
-      where.usuarioId = usuarioId;
-    }
+    const where: any = {
+      leida: false,
+      OR: [
+        { usuarioId },
+        { esGlobal: true },
+      ],
+    };
 
     return this.prisma.notificacion.updateMany({
       where,
@@ -70,11 +76,13 @@ export class NotificacionesService {
   }
 
   async getUnreadCount(usuarioId: string, rol: string = 'USER') {
-    const where: any = { leida: false };
-
-    if (rol !== 'ADMIN' && rol !== 'SUPERVISOR') {
-      where.usuarioId = usuarioId;
-    }
+    const where: any = {
+      leida: false,
+      OR: [
+        { usuarioId },
+        { esGlobal: true },
+      ],
+    };
 
     return this.prisma.notificacion.count({ where });
   }

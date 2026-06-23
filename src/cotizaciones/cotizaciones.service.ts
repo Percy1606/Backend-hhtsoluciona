@@ -404,7 +404,7 @@ export class CotizacionesService {
           data: {
             id: proyectoId,
             codigo: projectCode,
-            nombre: `PROYECTO: ${String(cotizacion.referencia || cotizacion.codigo).toUpperCase()}`,
+            nombre: String(cotizacion.referencia || cotizacion.codigo).toUpperCase(),
             descripcion: cotizacion.objetivo || '',
             estado: 'Planificacion',
             semaforo: 'Verde',
