@@ -692,4 +692,37 @@ export class FinanzasController {
   ) {
     return this.finanzasService.eliminarInyeccionPresupuesto(id, inyeccionId);
   }
+
+  // ============================================
+  // GASTOS FIJOS / RECURRENTES
+  // ============================================
+
+  @Get('gastos-fijos')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  getGastosFijos() {
+    return this.finanzasService.getGastosFijos();
+  }
+
+  @Post('gastos-fijos')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  createGastoFijo(@Body() dto: any) {
+    return this.finanzasService.createGastoFijo(dto);
+  }
+
+  @Delete('gastos-fijos/:id')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  deleteGastoFijo(@Param('id') id: string) {
+    return this.finanzasService.deleteGastoFijo(id);
+  }
+
+  @Patch('gastos-fijos/:id/toggle')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  toggleGastoFijo(@Param('id') id: string) {
+    return this.finanzasService.toggleGastoFijo(id);
+  }
 }
+

@@ -584,6 +584,31 @@ export class OperacionesService {
         esGlobal: true,
       });
 
+      // TRIGGER: Notificar a Finanzas para la facturación inicial
+      try {
+        const financeUsers = await this.prisma.usuario.findMany({
+          where: { activo: true },
+        });
+        const targetUsers = financeUsers.filter((u) => {
+          try {
+            const mods = typeof u.modulos === 'string' ? JSON.parse(u.modulos) : u.modulos;
+            return Array.isArray(mods) && mods.includes('finanzas');
+          } catch (e) {
+            return String(u.modulos).includes('finanzas');
+          }
+        });
+        for (const u of targetUsers) {
+          await this.notificacionesService.create({
+            usuarioId: u.id,
+            titulo: 'Facturación Inicial Pendiente',
+            mensaje: `Se ha registrado el proyecto "${proyecto.nombre}" (${proyecto.codigo}). Recuerde facturar el Hito Inicial (50%).`,
+            tipo: 'ALERTA',
+          });
+        }
+      } catch (e) {
+        console.error('Error al generar notificación para Finanzas en createProyecto:', e);
+      }
+
       // NUEVA LÓGICA: Crear Adelantos automáticos si la cotización tiene hitos COBRADOS
       const hitosCobrados = await this.prisma.hitoPago.findMany({
         where: {
@@ -681,6 +706,32 @@ export class OperacionesService {
       updateProyectoDto.estado &&
       updateProyectoDto.estado !== proyectoToUpdate.estado
     ) {
+      if (updateProyectoDto.estado === 'Finalizado') {
+        try {
+          const financeUsers = await this.prisma.usuario.findMany({
+            where: { activo: true },
+          });
+          const targetUsers = financeUsers.filter((u) => {
+            try {
+              const mods = typeof u.modulos === 'string' ? JSON.parse(u.modulos) : u.modulos;
+              return Array.isArray(mods) && mods.includes('finanzas');
+            } catch (e) {
+              return String(u.modulos).includes('finanzas');
+            }
+          });
+          for (const u of targetUsers) {
+            await this.notificacionesService.create({
+              usuarioId: u.id,
+              titulo: 'Facturación de Cierre Pendiente',
+              mensaje: `El proyecto "${proyectoToUpdate.nombre}" (${proyectoToUpdate.codigo}) ha finalizado en campo. Recuerde facturar el Hito Final (50%).`,
+              tipo: 'ALERTA',
+            });
+          }
+        } catch (e) {
+          console.error('Error al generar notificación para Finanzas en updateProyecto:', e);
+        }
+      }
+
       await this.registrarHistorial(
         id,
         null,

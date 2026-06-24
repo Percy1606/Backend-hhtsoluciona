@@ -5,6 +5,10 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import * as fs from 'fs';
+import * as path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import { CreateFacturaDto } from './dto/create-factura.dto';
 import { UpdateFacturaDto } from './dto/update-factura.dto';
 import { CreatePagoDto } from './dto/create-pago.dto';
@@ -2706,7 +2710,9 @@ export class FinanzasService {
     return this.prisma.proyecto.findMany({
       where: {
         estado: { not: 'Finalizado' },
-        cotizacionOrigen: { isNot: null },
+        cotizacionOrigen: {
+          estado: { in: ['Aprobada', 'Ganada', 'Orden de Servicio', 'Orden de servicio'] }
+        },
       },
       select: {
         id: true,
@@ -3069,5 +3075,129 @@ export class FinanzasService {
     });
 
     return { success: true, totalPresupuesto };
+  }
+
+  // ============================================
+  // GASTOS FIJOS / RECURRENTES
+  // ============================================
+
+  private getGastosFijosFilePath() {
+    return path.join(__dirname, '..', '..', 'src', 'finanzas', 'data', 'gastos-fijos.json');
+  }
+
+  async getGastosFijos() {
+    try {
+      const filePath = this.getGastosFijosFilePath();
+      if (!fs.existsSync(filePath)) {
+        const altPath = path.join(process.cwd(), 'src', 'finanzas', 'data', 'gastos-fijos.json');
+        if (fs.existsSync(altPath)) {
+          return JSON.parse(fs.readFileSync(altPath, 'utf8'));
+        }
+        return [];
+      }
+      return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    } catch (e) {
+      console.error('Error al leer gastos fijos:', e);
+      return [];
+    }
+  }
+
+  async createGastoFijo(dto: any) {
+    const list = await this.getGastosFijos();
+    const newGasto = {
+      id: uuidv4(),
+      concepto: dto.concepto,
+      monto: Number(dto.monto),
+      tipo: dto.tipo || 'ADMINISTRATIVO',
+      diaMes: Number(dto.diaMes || 1),
+      cajaId: dto.cajaId || null,
+      activo: true,
+    };
+    list.push(newGasto);
+    this.saveGastosFijos(list);
+    return newGasto;
+  }
+
+  async deleteGastoFijo(id: string) {
+    let list = await this.getGastosFijos();
+    list = list.filter((g: any) => g.id !== id);
+    this.saveGastosFijos(list);
+    return { success: true };
+  }
+
+  async toggleGastoFijo(id: string) {
+    const list = await this.getGastosFijos();
+    const item = list.find((g: any) => g.id === id);
+    if (item) {
+      item.activo = !item.activo;
+      this.saveGastosFijos(list);
+    }
+    return item;
+  }
+
+  private saveGastosFijos(list: any[]) {
+    try {
+      const filePath = this.getGastosFijosFilePath();
+      if (fs.existsSync(filePath)) {
+        fs.writeFileSync(filePath, JSON.stringify(list, null, 2), 'utf8');
+      }
+      const altPath = path.join(process.cwd(), 'src', 'finanzas', 'data', 'gastos-fijos.json');
+      fs.writeFileSync(altPath, JSON.stringify(list, null, 2), 'utf8');
+    } catch (e) {
+      console.error('Error al guardar gastos fijos:', e);
+    }
+  }
+
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async handleRecurringGastosCron() {
+    console.log('[Cron Job] Ejecutando procesamiento de gastos fijos recurrentes...');
+    const hoy = new Date();
+    const diaActual = hoy.getDate();
+    const list = await this.getGastosFijos();
+    
+    // Filtrar gastos activos correspondientes al día de hoy
+    const gastosDeHoy = list.filter((g: any) => g.activo && Number(g.diaMes) === diaActual);
+    
+    for (const g of gastosDeHoy) {
+      try {
+        const inicioDia = new Date();
+        inicioDia.setHours(0,0,0,0);
+        const finDia = new Date();
+        finDia.setHours(23,59,59,999);
+
+        const existe = await this.prisma.gasto.findFirst({
+          where: {
+            concepto: { contains: `[Gasto Fijo] ${g.concepto}` },
+            fechaEmision: {
+              gte: inicioDia,
+              lte: finDia,
+            }
+          }
+        });
+
+        if (existe) {
+          console.log(`[Cron Job] El gasto recurrente "${g.concepto}" ya fue registrado hoy.`);
+          continue;
+        }
+
+        await this.prisma.gasto.create({
+          data: {
+            concepto: `[Gasto Fijo] ${g.concepto}`,
+            montoTotal: g.monto,
+            saldoPendiente: g.monto,
+            tipo: g.tipo || 'ADMINISTRATIVO',
+            estado: 'PENDIENTE',
+            cajaId: g.cajaId || null,
+            solicitanteId: 'SISTEMA',
+            registradoPorId: 'SISTEMA',
+            fechaEmision: new Date(),
+            updatedAt: new Date(),
+          }
+        });
+        console.log(`[Cron Job] Gasto fijo "${g.concepto}" registrado correctamente.`);
+      } catch (error) {
+        console.error(`[Cron Job] Error al registrar gasto fijo recurrente: ${g.concepto}`, error);
+      }
+    }
   }
 }
