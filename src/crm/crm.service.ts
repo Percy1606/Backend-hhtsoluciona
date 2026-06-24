@@ -624,7 +624,13 @@ export class CrmService {
         select: { proyectoGeneradoId: true },
       });
       if (cot?.proyectoGeneradoId) {
-        connectData.proyecto = { connect: { id: cot.proyectoGeneradoId } };
+        const projExists = await this.prisma.proyecto.findUnique({
+          where: { id: cot.proyectoGeneradoId },
+          select: { id: true },
+        });
+        if (projExists) {
+          connectData.proyecto = { connect: { id: cot.proyectoGeneradoId } };
+        }
       }
     }
 
