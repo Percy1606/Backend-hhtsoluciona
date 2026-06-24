@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
 import { resolve, sep } from 'path';
-import { Logger } from '@nestjs/common';
+import { Logger, BadRequestException } from '@nestjs/common';
 
 const logger = new Logger('FileUtils');
 
@@ -34,6 +34,9 @@ export async function deletePhysicalFile(fileUrl: string | null | undefined): Pr
     logger.log(`Archivo eliminado con éxito: ${absolutePath}`);
   } catch (error) {
     logger.error(`Error al intentar eliminar el archivo ${fileUrl}: ${error.message}`);
+    throw new BadRequestException(
+      'No se pudo eliminar el documento físico asociado en el servidor. La operación fue cancelada para proteger la integridad de los datos. Por favor, inténtelo de nuevo o contacte al administrador.',
+    );
   }
 }
 

@@ -11,7 +11,12 @@ import {
   Req,
   Query,
   BadRequestException,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname } from 'path';
 import { LogisticaService } from './logistica.service';
 import { CreateInsumoDto } from './dto/create-insumo.dto';
 import { CreateProveedorDto } from './dto/create-proveedor.dto';
@@ -119,6 +124,30 @@ export class LogisticaController {
   // ============================================
   // ORDENES DE COMPRA
   // ============================================
+  @Post('upload')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: './uploads/logistica',
+        filename: (req: any, file: any, cb: any) => {
+          const uniqueSuffix =
+            Date.now() + '-' + Math.round(Math.random() * 1e9);
+          cb(null, `${uniqueSuffix}${extname(file.originalname)}`);
+        },
+      }),
+      limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
+    }),
+  )
+  async uploadFile(@UploadedFile() file: any) {
+    if (!file) throw new Error('Archivo no válido.');
+    return {
+      url: `/uploads/logistica/${file.filename}`,
+      nombre: file.originalname,
+      tipo: file.mimetype,
+      tamano: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+    };
+  }
+
   @Post('ordenes')
   createOrdenCompra(@Body() dto: CreateOrdenCompraDto, @Req() req: any) {
     return this.logisticaService.createOrdenCompra(dto, req.user.id);

@@ -427,14 +427,14 @@ export class LogisticaService {
     if (orden.estado === EstadoCompra.RECIBIDO)
       throw new BadRequestException('No se puede eliminar una orden recibida');
 
+    if (orden.archivoFactura) {
+      await deletePhysicalFiles([orden.archivoFactura]);
+    }
+
     const result = await this.prisma.$transaction(async (tx) => {
       await tx.detalleOrdenCompra.deleteMany({ where: { ordenId: id } });
       return tx.ordenCompra.delete({ where: { id } });
     });
-
-    if (orden.archivoFactura) {
-      await deletePhysicalFiles([orden.archivoFactura]);
-    }
 
     return result;
   }

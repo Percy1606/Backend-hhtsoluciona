@@ -757,6 +757,10 @@ export class OperacionesService {
         });
       });
 
+      // 1. ELIMINACIÓN FÍSICA DE LOS ARCHIVOS DEL DISCO PRIMERO
+      await deletePhysicalFiles(urlsToDelete);
+
+      // 2. PROCEDER CON LA ELIMINACIÓN DE REGISTROS EN LA BD
       await this.prisma.$transaction(async (tx) => {
         const actividades = await tx.actividad.findMany({
           where: { proyectoId: id },
@@ -813,9 +817,6 @@ export class OperacionesService {
         await tx.indicadorAvance.deleteMany({ where: { proyectoId: id } });
         await tx.proyecto.delete({ where: { id } });
       });
-
-      // 2. ELIMINACIÓN FÍSICA DE LOS ARCHIVOS DEL DISCO SOLO SI TRANSACCIÓN EXITOSA
-      await deletePhysicalFiles(urlsToDelete);
 
       if (user) {
         await this.auditoriaService.createLog({
@@ -1102,9 +1103,11 @@ export class OperacionesService {
         if (v.evidenciaUrl) urlsToDelete.push(v.evidenciaUrl);
       });
 
-      await this.prisma.actividad.delete({ where: { id } });
-
+      // 1. Eliminar archivos físicos primero
       await deletePhysicalFiles(urlsToDelete);
+
+      // 2. Proceder con la eliminación del registro
+      await this.prisma.actividad.delete({ where: { id } });
 
       await this.updateProjectProgress(actividad.proyectoId);
     }
@@ -1633,15 +1636,16 @@ export class OperacionesService {
     const urlsToDelete =
       ficha.adjuntos?.map((adj) => adj.url).filter(Boolean) || [];
 
+    // 1. ELIMINACIÓN FÍSICA PRIMERO
+    await deletePhysicalFiles(urlsToDelete);
+
+    // 2. PROCEDER CON LA ELIMINACIÓN DE REGISTROS EN LA BD
     await this.prisma.$transaction(async (tx) => {
       await tx.fichaTecnicaAdjunto.deleteMany({
         where: { fichaTecnicaId: id },
       });
       await tx.fichaTecnica.delete({ where: { id } });
     });
-
-    // 2. ELIMINACIÓN FÍSICA SOLO SI TRANSACCIÓN EXITOSA
-    await deletePhysicalFiles(urlsToDelete);
 
     if (user) {
       await this.auditoriaService.createLog({

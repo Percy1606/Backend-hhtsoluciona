@@ -644,6 +644,10 @@ export class CotizacionesService {
 
     const urlsToDelete = cotizacion.documentos.map((d) => d.url).filter(Boolean);
 
+    // 1. Eliminar archivos físicos primero
+    await deletePhysicalFiles(urlsToDelete);
+
+    // 2. Proceder con la eliminación de registros en base de datos
     await this.prisma.$transaction(async (tx) => {
       await tx.hitoPago.deleteMany({ where: { cotizacionId: id } });
       await tx.documento.deleteMany({ where: { cotizacionId: id } });
@@ -656,12 +660,6 @@ export class CotizacionesService {
 
       await tx.cotizacion.delete({ where: { id } });
     });
-
-    try {
-      await deletePhysicalFiles(urlsToDelete);
-    } catch (e) {
-      console.error("Error deleting physical files", e);
-    }
 
     return { message: "Cotización eliminada exitosamente" };
   }

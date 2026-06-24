@@ -668,6 +668,11 @@ export class FinanzasService {
     // Se obtendrán los pagos antes de la transacción para revertir caja
     const pagosFactura = factura.pagos;
 
+    const urlsToDelete = pagosFactura.map((p) => p.comprobanteUrl).filter(Boolean);
+
+    // 1. Eliminar archivos físicos primero
+    await deletePhysicalFiles(urlsToDelete);
+
     const result = await this.prisma.$transaction(async (tx) => {
       // 1. REVERTIR SALDO EN CAJA por cada pago (descuenta el monto cobrado)
       for (const pago of pagosFactura) {
@@ -1084,6 +1089,9 @@ export class FinanzasService {
       .map((p) => p.comprobanteUrl)
       .filter(Boolean);
 
+    // 1. Eliminar archivos físicos primero
+    await deletePhysicalFiles(urlsToDelete);
+
     const result = await this.prisma.$transaction(async (tx) => {
       // 1. REVERTIR SALDO EN CAJA por cada pago vinculado al gasto (se devuelve el dinero)
       for (const pago of gasto.pagos) {
@@ -1123,9 +1131,6 @@ export class FinanzasService {
         },
       });
     });
-
-    // 3. Borrar archivos físicos
-    await deletePhysicalFiles(urlsToDelete);
 
     return result;
   }
@@ -1203,6 +1208,11 @@ export class FinanzasService {
 
     if (!rendicion) throw new NotFoundException('Rendición no encontrada');
 
+    // 1. Borrar archivo físico si existe primero
+    if (rendicion.comprobanteUrl) {
+      await deletePhysicalFiles([rendicion.comprobanteUrl]);
+    }
+
     const result = await this.prisma.$transaction(async (tx) => {
       // 1. Calcular nuevo monto rendido
       const nuevoMontoRendido =
@@ -1235,11 +1245,6 @@ export class FinanzasService {
       });
     });
 
-    // 4. Borrar archivo físico si existe
-    if (rendicion.comprobanteUrl) {
-      await deletePhysicalFiles([rendicion.comprobanteUrl]);
-    }
-
     return result;
   }
 
@@ -1254,6 +1259,11 @@ export class FinanzasService {
     });
 
     if (!pago) throw new NotFoundException('Pago no encontrado');
+
+    // 1. Borrar archivo físico si existe primero
+    if (pago.comprobanteUrl) {
+      await deletePhysicalFiles([pago.comprobanteUrl]);
+    }
 
     const result = await this.prisma.$transaction(async (tx) => {
       // 1. Revertir saldo en caja
@@ -1314,11 +1324,6 @@ export class FinanzasService {
       // 3. Eliminar pago
       return tx.pago.delete({ where: { id } });
     });
-
-    // 4. Borrar archivo físico si existe
-    if (pago.comprobanteUrl) {
-      await deletePhysicalFiles([pago.comprobanteUrl]);
-    }
 
     return result;
   }
@@ -1882,15 +1887,14 @@ export class FinanzasService {
 
       console.log(`[AUDITORÍA] Proceso de eliminación finalizado.`);
 
+      // 1. Eliminar archivos físicos primero
+      await deletePhysicalFiles(urlsToDelete);
+
       // Eliminar la transacción físicamente de la caja
       await tx.transaccionCaja.delete({ where: { id } });
 
-      return { success: true, urlsToDelete };
+      return { success: true };
     });
-
-    if (result.urlsToDelete && result.urlsToDelete.length > 0) {
-      await deletePhysicalFiles(result.urlsToDelete);
-    }
 
     return result;
   }

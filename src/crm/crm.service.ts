@@ -400,6 +400,9 @@ export class CrmService {
         });
       }
 
+      // 1.5 Eliminar archivos físicos primero
+      await deletePhysicalFiles(urlsToDelete);
+
       const clienteEliminado = await this.prisma.$transaction(async (tx) => {
         const fichas = await tx.fichaTecnica.findMany({
           where: { clienteId: id },
@@ -435,9 +438,6 @@ export class CrmService {
           where: { id },
         });
       });
-
-      // 2. Borrar archivos físicos solo si la transacción fue exitosa
-      await deletePhysicalFiles(urlsToDelete);
 
       if (user) {
         await this.auditoriaService.createLog({
@@ -645,13 +645,13 @@ export class CrmService {
       select: { url: true },
     });
 
-    const result = await this.prisma.documento.delete({
-      where: { id },
-    });
-
     if (doc?.url) {
       await deletePhysicalFiles([doc.url]);
     }
+
+    const result = await this.prisma.documento.delete({
+      where: { id },
+    });
 
     return result;
   }
