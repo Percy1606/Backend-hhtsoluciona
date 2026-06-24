@@ -3151,52 +3151,97 @@ export class FinanzasService {
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async handleRecurringGastosCron() {
     console.log('[Cron Job] Ejecutando procesamiento de gastos fijos recurrentes...');
-    const hoy = new Date();
-    const diaActual = hoy.getDate();
     const list = await this.getGastosFijos();
-    
-    // Filtrar gastos activos correspondientes al día de hoy
-    const gastosDeHoy = list.filter((g: any) => g.activo && Number(g.diaMes) === diaActual);
-    
-    for (const g of gastosDeHoy) {
+    const activos = list.filter((g: any) => g.activo);
+
+    const hoyMidnight = new Date();
+    hoyMidnight.setHours(0, 0, 0, 0);
+
+    const diaActual = hoyMidnight.getDate();
+    const mesActual = hoyMidnight.getMonth();
+    const anioActual = hoyMidnight.getFullYear();
+
+    for (const g of activos) {
       try {
-        const inicioDia = new Date();
-        inicioDia.setHours(0,0,0,0);
-        const finDia = new Date();
-        finDia.setHours(23,59,59,999);
+        const diaPagoGasto = Number(g.diaMes);
+        let mesTarget = mesActual;
+        let anioTarget = anioActual;
 
-        const existe = await this.prisma.gasto.findFirst({
-          where: {
-            concepto: { contains: `[Gasto Fijo] ${g.concepto}` },
-            fechaEmision: {
-              gte: inicioDia,
-              lte: finDia,
-            }
+        // Si hoy ya pasó el día de pago de este mes, la fecha objetivo es el siguiente mes
+        if (diaActual > diaPagoGasto) {
+          mesTarget += 1;
+          if (mesTarget > 11) {
+            mesTarget = 0;
+            anioTarget += 1;
           }
-        });
-
-        if (existe) {
-          console.log(`[Cron Job] El gasto recurrente "${g.concepto}" ya fue registrado hoy.`);
-          continue;
         }
 
-        await this.prisma.gasto.create({
-          data: {
-            concepto: `[Gasto Fijo] ${g.concepto}`,
-            montoTotal: g.monto,
-            saldoPendiente: g.monto,
-            tipo: g.tipo || 'ADMINISTRATIVO',
-            estado: 'PENDIENTE',
-            cajaId: g.cajaId || null,
-            solicitanteId: 'SISTEMA',
-            registradoPorId: 'SISTEMA',
-            fechaEmision: new Date(),
-            updatedAt: new Date(),
+        const fechaPago = new Date(anioTarget, mesTarget, diaPagoGasto, 0, 0, 0, 0);
+        const diffTiempo = fechaPago.getTime() - hoyMidnight.getTime();
+        const diffDias = Math.round(diffTiempo / (1000 * 60 * 60 * 24));
+
+        // Registrar y notificar exactamente 2 días antes del día de pago
+        if (diffDias === 2) {
+          const conceptoGasto = `[Gasto Fijo] ${g.concepto}`;
+
+          // Evitar registrar duplicados para este mismo vencimiento futuro
+          const existe = await this.prisma.gasto.findFirst({
+            where: {
+              concepto: { contains: conceptoGasto },
+              fechaVencimiento: {
+                gte: new Date(anioTarget, mesTarget, diaPagoGasto, 0, 0, 0, 0),
+                lte: new Date(anioTarget, mesTarget, diaPagoGasto, 23, 59, 59, 999),
+              }
+            }
+          });
+
+          if (existe) {
+            console.log(`[Cron Job] El gasto recurrente "${g.concepto}" para el vencimiento del día ${diaPagoGasto} ya fue registrado hoy.`);
+            continue;
           }
-        });
-        console.log(`[Cron Job] Gasto fijo "${g.concepto}" registrado correctamente.`);
+
+          // Crear el gasto pendiente 2 días antes, poniendo fecha de vencimiento igual a fechaPago
+          const nuevoGasto = await this.prisma.gasto.create({
+            data: {
+              concepto: conceptoGasto,
+              montoTotal: g.monto,
+              saldoPendiente: g.monto,
+              tipo: g.tipo || 'ADMINISTRATIVO',
+              estado: 'PENDIENTE',
+              cajaId: g.cajaId || null,
+              solicitanteId: 'SISTEMA',
+              registradoPorId: 'SISTEMA',
+              fechaEmision: new Date(),
+              fechaVencimiento: fechaPago,
+              updatedAt: new Date(),
+            }
+          });
+
+          // Notificar a usuarios de Finanzas
+          const financeUsers = await this.prisma.usuario.findMany({
+            where: { activo: true },
+          });
+          const targetUsers = financeUsers.filter((u) => {
+            try {
+              const mods = typeof u.modulos === 'string' ? JSON.parse(u.modulos) : u.modulos;
+              return Array.isArray(mods) && mods.includes('finanzas');
+            } catch (e) {
+              return String(u.modulos).includes('finanzas');
+            }
+          });
+
+          for (const u of targetUsers) {
+            await this.notificacionesService.create({
+              usuarioId: u.id,
+              titulo: 'Gasto Fijo Próximo a Vencer',
+              mensaje: `El gasto fijo "${g.concepto}" vencerá en 2 días (el ${diaPagoGasto}/${mesTarget + 1}/${anioTarget}) por un monto de S/ ${Number(g.monto).toLocaleString('es-PE')}.`,
+              tipo: 'ALERTA',
+            });
+          }
+          console.log(`[Cron Job] Gasto fijo "${g.concepto}" registrado y notificado exitosamente para la fecha del 2 días antes.`);
+        }
       } catch (error) {
-        console.error(`[Cron Job] Error al registrar gasto fijo recurrente: ${g.concepto}`, error);
+        console.error(`[Cron Job] Error al procesar gasto fijo recurrente: ${g.concepto}`, error);
       }
     }
   }

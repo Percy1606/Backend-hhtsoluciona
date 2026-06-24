@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "id": "aefa4f0b-114b-4f36-a7b6-44cae63b91ae",
+    "concepto": "Pago luz",
+    "monto": 100,
+    "tipo": "ADMINISTRATIVO",
+    "diaMes": 28,
+    "cajaId": "9b8b65ef-c685-4d8b-94a5-09b8ead008f6",
+    "activo": true
+  }
+]

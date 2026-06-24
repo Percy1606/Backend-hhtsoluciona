@@ -586,6 +586,17 @@ export class OperacionesService {
 
       // TRIGGER: Notificar a Finanzas para la facturación inicial
       try {
+        const hitos = await this.prisma.hitoPago.findMany({
+          where: { cotizacionId },
+          orderBy: { porcentaje: 'asc' }
+        });
+
+        let descHitos = 'el Hito Inicial (50%)';
+        if (hitos && hitos.length > 0) {
+          const primerHito = hitos[0];
+          descHitos = `el Hito Inicial: "${primerHito.descripcion}" (${Number(primerHito.porcentaje)}% - S/ ${Number(primerHito.monto).toLocaleString('es-PE')})`;
+        }
+
         const financeUsers = await this.prisma.usuario.findMany({
           where: { activo: true },
         });
@@ -601,7 +612,7 @@ export class OperacionesService {
           await this.notificacionesService.create({
             usuarioId: u.id,
             titulo: 'Facturación Inicial Pendiente',
-            mensaje: `Se ha registrado el proyecto "${proyecto.nombre}" (${proyecto.codigo}). Recuerde facturar el Hito Inicial (50%).`,
+            mensaje: `Se ha registrado el proyecto "${proyecto.nombre}" (${proyecto.codigo}). Recuerde facturar ${descHitos}.`,
             tipo: 'ALERTA',
           });
         }
@@ -708,6 +719,34 @@ export class OperacionesService {
     ) {
       if (updateProyectoDto.estado === 'Finalizado') {
         try {
+          const projectWithQuote = await this.prisma.proyecto.findUnique({
+            where: { id },
+            select: {
+              cotizacionOrigen: {
+                select: {
+                  id: true
+                }
+              }
+            }
+          });
+
+          let descHitos = 'el Hito Final (50%)';
+          if (projectWithQuote?.cotizacionOrigen?.id) {
+            const hitos = await this.prisma.hitoPago.findMany({
+              where: { cotizacionId: projectWithQuote.cotizacionOrigen.id },
+              orderBy: { porcentaje: 'asc' }
+            });
+            if (hitos && hitos.length > 0) {
+              const ultimoHito = hitos[hitos.length - 1];
+              descHitos = `el Hito Final: "${ultimoHito.descripcion}" (${Number(ultimoHito.porcentaje)}% - S/ ${Number(ultimoHito.monto).toLocaleString('es-PE')})`;
+              
+              const hitosPendientes = hitos.filter(h => h.estado !== 'FACTURADO' && h.estado !== 'COBRADO');
+              if (hitosPendientes.length > 1) {
+                descHitos = `los hitos pendientes: ` + hitosPendientes.map(h => `"${h.descripcion}" (${Number(h.porcentaje)}%)`).join(', ');
+              }
+            }
+          }
+
           const financeUsers = await this.prisma.usuario.findMany({
             where: { activo: true },
           });
@@ -723,7 +762,7 @@ export class OperacionesService {
             await this.notificacionesService.create({
               usuarioId: u.id,
               titulo: 'Facturación de Cierre Pendiente',
-              mensaje: `El proyecto "${proyectoToUpdate.nombre}" (${proyectoToUpdate.codigo}) ha finalizado en campo. Recuerde facturar el Hito Final (50%).`,
+              mensaje: `El proyecto "${proyectoToUpdate.nombre}" (${proyectoToUpdate.codigo}) ha finalizado en campo. Recuerde facturar ${descHitos}.`,
               tipo: 'ALERTA',
             });
           }
