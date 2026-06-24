@@ -3231,11 +3231,13 @@ export class FinanzasService {
           });
 
           for (const u of targetUsers) {
-            await this.notificacionesService.create({
-              usuarioId: u.id,
-              titulo: 'Gasto Fijo Próximo a Vencer',
-              mensaje: `El gasto fijo "${g.concepto}" vencerá en 2 días (el ${diaPagoGasto}/${mesTarget + 1}/${anioTarget}) por un monto de S/ ${Number(g.monto).toLocaleString('es-PE')}.`,
-              tipo: 'ALERTA',
+            await this.prisma.notificacion.create({
+              data: {
+                usuarioId: u.id,
+                titulo: 'Gasto Fijo Próximo a Vencer',
+                mensaje: `El gasto fijo "${g.concepto}" vencerá en 2 días (el ${diaPagoGasto}/${mesTarget + 1}/${anioTarget}) por un monto de S/ ${Number(g.monto).toLocaleString('es-PE')}.`,
+                tipo: 'SISTEMA',
+              }
             });
           }
           console.log(`[Cron Job] Gasto fijo "${g.concepto}" registrado y notificado exitosamente para la fecha del 2 días antes.`);
