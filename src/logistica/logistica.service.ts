@@ -307,7 +307,7 @@ export class LogisticaService {
       }
     }
 
-    const [data, total] = await Promise.all([
+    const [data, total, agg] = await Promise.all([
       this.prisma.ordenCompra.findMany({
         where,
         skip,
@@ -320,11 +320,16 @@ export class LogisticaService {
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.ordenCompra.count({ where }),
+      this.prisma.ordenCompra.aggregate({
+        where,
+        _sum: { montoTotal: true },
+      }),
     ]);
 
     return {
       data,
       total,
+      totalMonto: agg._sum.montoTotal ? Number(agg._sum.montoTotal) : 0,
       page,
       limit,
       totalPages: Math.ceil(total / limit),
