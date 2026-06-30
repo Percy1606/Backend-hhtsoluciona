@@ -86,12 +86,15 @@ export class TasksService {
   // REVISION DE FACTURAS VENCIDAS
   private async checkOverdueInvoices() {
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
 
     // Buscar facturas no pagadas cuya fecha de vencimiento ya paso
     const overdueInvoices = await this.prisma.factura.findMany({
       where: {
         estado: { in: ['PENDIENTE', 'PAGO_PARCIAL'] },
-        fechaVencimiento: { lt: today },
+        fechaVencimiento: { lt: today, gte: yesterday },
       },
       include: { cliente: true },
     });
@@ -175,10 +178,14 @@ export class TasksService {
   // 4. Visitas Técnicas Vencidas (PENDIENTE y fecha pasada)
   private async checkOverdueVisits() {
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
     const overdueVisits = await this.prisma.fichaTecnica.findMany({
       where: {
         estado: 'PENDIENTE',
-        fechaVisita: { lt: today },
+        fechaVisita: { lt: today, gte: yesterday },
       },
       include: { cliente: true, tecnico: true },
     });
@@ -228,12 +235,27 @@ export class TasksService {
       });
 
       if (user) {
-        await this.notificacionesService.create({
-          usuarioId: user.id,
-          titulo: 'Proyecto en Estado Crítico',
-          mensaje: `El proyecto ${proyecto.nombre} está marcado en ROJO. Por favor revise el cronograma y actividades.`,
-          tipo: 'SISTEMA',
+        // Evitar spam: solo notificar 1 vez cada 7 dias por proyecto
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        
+        const existingNotif = await this.prisma.notificacion.findFirst({
+          where: {
+            usuarioId: user.id,
+            titulo: 'Proyecto en Estado Crítico',
+            mensaje: { contains: proyecto.nombre },
+            createdAt: { gte: sevenDaysAgo },
+          },
         });
+
+        if (!existingNotif) {
+          await this.notificacionesService.create({
+            usuarioId: user.id,
+            titulo: 'Proyecto en Estado Crítico',
+            mensaje: `El proyecto ${proyecto.nombre} está marcado en ROJO. Por favor revise el cronograma y actividades.`,
+            tipo: 'SISTEMA',
+          });
+        }
       }
     }
   }
@@ -288,11 +310,14 @@ export class TasksService {
   // 2. Actividades (Tareas) vencidas
   private async checkOverdueActivities() {
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
 
     const overdueActivities = await this.prisma.actividad.findMany({
       where: {
         estado: { notIn: ['Completada', 'Validada'] },
-        fechaVencimiento: { lt: today },
+        fechaVencimiento: { lt: today, gte: yesterday },
       },
       include: { proyecto: true },
     });
@@ -318,14 +343,17 @@ export class TasksService {
   private async checkAbandonedClients() {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    const eightDaysAgo = new Date();
+    eightDaysAgo.setDate(eightDaysAgo.getDate() - 8);
 
     const abandonedClients = await this.prisma.cliente.findMany({
       where: {
         deletedAt: null,
         etapaComercial: { notIn: ['Ganado', 'Perdido'] },
         OR: [
-          { ultimoContacto: { lt: sevenDaysAgo } },
-          { ultimoContacto: null, fechaCreacion: { lt: sevenDaysAgo } },
+          { ultimoContacto: { lt: sevenDaysAgo, gte: eightDaysAgo } },
+          { ultimoContacto: null, fechaCreacion: { lt: sevenDaysAgo, gte: eightDaysAgo } },
         ],
       },
     });
