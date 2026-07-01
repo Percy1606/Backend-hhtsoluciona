@@ -474,9 +474,76 @@ export class OperacionesService {
         clientId: dto.clientId,
         estado: { not: 'Finalizado' },
       },
+      include: {
+        cotizacionOrigen: true
+      }
     });
 
     if (existingActiveProject) {
+      // Si existe un proyecto, verificamos si es una PREVENTA y le estamos intentando inyectar una COTIZACIÓN
+      const isPreventa = !existingActiveProject.cotizacionOrigen && Number(existingActiveProject.ventaContratada) === 0;
+
+      if (isPreventa && cotizacionId) {
+        // ========== LÓGICA DE CONVERSIÓN DE PREVENTA A PROYECTO NORMAL ==========
+        const cotizacion = await this.prisma.cotizacion.findUnique({
+          where: { id: cotizacionId },
+        });
+        if (!cotizacion) throw new BadRequestException('La cotización asociada no existe.');
+
+        // Actualizar el proyecto existente con los montos
+        const updatedProject = await this.prisma.proyecto.update({
+          where: { id: existingActiveProject.id },
+          data: {
+            ventaContratada: Number(cotizacion.monto),
+            margenMeta: Number(cotizacion.monto) - Number(existingActiveProject.costoPresupuestado || 0),
+            cotizacionOrigen: { connect: { id: cotizacionId } }
+          }
+        });
+
+        // Vincular los documentos de la cotización al proyecto convertido
+        await this.prisma.documento.updateMany({
+          where: { cotizacionId: cotizacionId },
+          data: { proyectoId: updatedProject.id },
+        });
+
+        // Crear los Adelantos automáticos si la cotización tiene hitos COBRADOS
+        const hitosCobrados = await this.prisma.hitoPago.findMany({
+          where: {
+            cotizacionId: cotizacionId,
+            estado: 'COBRADO'
+          }
+        });
+
+        for (const hito of hitosCobrados) {
+          await this.prisma.adelantoProyecto.create({
+            data: {
+              id: uuidv4(),
+              proyectoId: updatedProject.id,
+              monto: Number(hito.monto),
+              fechaRecibido: new Date(),
+              metodo: 'TRANSFERENCIA',
+              referencia: `Hito: ${hito.descripcion}`,
+              saldoDisponible: Number(hito.monto),
+              montoAplicado: 0,
+              observaciones: `Cargado automáticamente desde Cotización ${cotizacion.codigo} (Conversión)`,
+              registradoPorId: user?.id || 'SISTEMA',
+              updatedAt: new Date()
+            }
+          });
+        }
+
+        await this.registrarHistorial(
+          updatedProject.id,
+          null,
+          'PROYECTO_CONVERTIDO',
+          '',
+          `Proyecto de Preventa convertido exitosamente a Proyecto Oficial (Cotización ${cotizacion.codigo})`,
+          user,
+        );
+
+        return updatedProject as any; // Se castea para ignorar el include adicional en el tipo de retorno si lo hubiera
+      }
+
       throw new BadRequestException({
         error: 'Cliente con Proyecto Activo',
         message: `El cliente ya tiene un proyecto operativo vigente: "${existingActiveProject.nombre}" (${existingActiveProject.codigo}). Debe finalizar el proyecto actual antes de registrar uno nuevo.`,
