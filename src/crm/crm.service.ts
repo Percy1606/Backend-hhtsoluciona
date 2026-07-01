@@ -102,8 +102,26 @@ export class CrmService {
         this.prisma.cliente.count({ where }),
       ]);
 
+      // Obtener todos los logs de CREAR_CLIENTE
+      const creationLogs = await this.prisma.auditLog.findMany({
+        where: { accion: 'CREAR_CLIENTE' },
+        include: { usuario: { select: { nombre: true } } }
+      });
+      
+      const logMap = new Map();
+      for (const log of creationLogs) {
+        if (log.detalles && typeof log.detalles === 'object' && 'clienteId' in log.detalles) {
+          logMap.set((log.detalles as any).clienteId, log.usuario?.nombre);
+        }
+      }
+
+      const enhancedData = data.map(c => ({
+        ...c,
+        creadoPor: logMap.get(c.id) || c.asignadoA
+      }));
+
       return {
-        data,
+        data: enhancedData,
         total,
         page,
         limit,
@@ -136,7 +154,17 @@ export class CrmService {
         `Cliente con ID/CÓDIGO "${id}" no encontrado.`,
       );
     }
-    return cliente;
+
+    const logs = await this.prisma.auditLog.findMany({
+      where: { accion: 'CREAR_CLIENTE' },
+      include: { usuario: { select: { nombre: true } } },
+    });
+    const log = logs.find(l => l.detalles && typeof l.detalles === 'object' && (l.detalles as any).clienteId === cliente.id);
+
+    return {
+      ...cliente,
+      creadoPor: (log as any)?.usuario?.nombre || cliente.asignadoA,
+    };
   }
 
   async createCliente(dto: CreateClienteDto, user?: any) {
