@@ -52,6 +52,7 @@ export class CreateProyectoDto {
   @Type(() => Number)
   costoPresupuestado?: number;
 
+  @IsOptional()
   @IsString()
-  cotizacionId: string;
+  cotizacionId?: string | null;
 }
