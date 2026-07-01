@@ -8,4 +8,7 @@ export class UpdateActividadDto extends PartialType(CreateActividadDto) {
 
   @Allow()
   responsableId?: string;
+
+  @Allow()
+  progreso?: number;
 }

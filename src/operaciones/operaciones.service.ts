@@ -483,26 +483,33 @@ export class OperacionesService {
       });
     }
 
-    const cotizacion = await this.prisma.cotizacion.findUnique({
-      where: { id: cotizacionId },
-    });
-    if (!cotizacion)
-      throw new BadRequestException('La cotización asociada no existe.');
+    let cotizacion = null;
+    let cliente = null;
 
-    const cliente = await this.prisma.cliente.findUnique({
-      where: { id: cotizacion.clientId },
-    });
-    if (!cliente)
-      throw new BadRequestException(
-        'El cliente asociado a la cotización no existe.',
-      );
-
-    const allowedStages = ['Ganado', 'Orden de Servicio'];
-    if (!allowedStages.includes(cliente.etapaComercial)) {
-      throw new BadRequestException({
-        error: 'Proyecto no autorizado',
-        message: `No es posible registrar este proyecto porque el cliente (${cliente.empresa}) se encuentra en etapa "${cliente.etapaComercial}".`,
+    if (cotizacionId) {
+      cotizacion = await this.prisma.cotizacion.findUnique({
+        where: { id: cotizacionId },
       });
+      if (!cotizacion) throw new BadRequestException('La cotización asociada no existe.');
+
+      cliente = await this.prisma.cliente.findUnique({
+        where: { id: cotizacion.clientId },
+      });
+      if (!cliente) throw new BadRequestException('El cliente asociado a la cotización no existe.');
+
+      const allowedStages = ['Ganado', 'Orden de Servicio'];
+      if (!allowedStages.includes(cliente.etapaComercial)) {
+        throw new BadRequestException({
+          error: 'Proyecto no autorizado',
+          message: `No es posible registrar este proyecto porque el cliente (${cliente.empresa}) se encuentra en etapa "${cliente.etapaComercial}".`,
+        });
+      }
+    } else {
+      // Flujo de Preventa
+      cliente = await this.prisma.cliente.findUnique({
+        where: { id: dto.clientId },
+      });
+      if (!cliente) throw new BadRequestException('El cliente seleccionado no existe.');
     }
 
     const newProyectoId = uuidv4();
@@ -532,9 +539,9 @@ export class OperacionesService {
           avance: 0,
           avanceCalculado: 0,
 
-          ventaContratada: Number(cotizacion.monto),
+          ventaContratada: cotizacion ? Number(cotizacion.monto) : 0,
           costoPresupuestado: Number(dto.costoPresupuestado || 0),
-          margenMeta: Number(cotizacion.monto) - Number(dto.costoPresupuestado || 0),
+          margenMeta: (cotizacion ? Number(cotizacion.monto) : 0) - Number(dto.costoPresupuestado || 0),
 
           creadoPor: user?.nombre || 'Admin',
           fechaCreacion: new Date(),
@@ -543,15 +550,17 @@ export class OperacionesService {
           clientId: dto.clientId,
           responsablePrincipalId: dto.responsablePrincipalId,
           responsablesAdicionales: dto.responsablesAdicionales || [],
-          cotizacionOrigen: { connect: { id: cotizacionId } },
+          cotizacionOrigen: cotizacionId ? { connect: { id: cotizacionId } } : undefined,
         },
       });
 
       // Vincular los documentos de la cotización al nuevo proyecto
-      await this.prisma.documento.updateMany({
-        where: { cotizacionId: cotizacionId },
-        data: { proyectoId: newProyectoId },
-      });
+      if (cotizacionId) {
+        await this.prisma.documento.updateMany({
+          where: { cotizacionId: cotizacionId },
+          data: { proyectoId: newProyectoId },
+        });
+      }
 
       if (user) {
         await this.auditoriaService.createLog({
@@ -585,65 +594,67 @@ export class OperacionesService {
       });
 
       // TRIGGER: Notificar a Finanzas para la facturación inicial
-      try {
-        const hitos = await this.prisma.hitoPago.findMany({
-          where: { cotizacionId },
-          orderBy: { porcentaje: 'asc' }
-        });
-
-        let descHitos = 'el Hito Inicial (50%)';
-        if (hitos && hitos.length > 0) {
-          const primerHito = hitos[0];
-          descHitos = `el Hito Inicial: "${primerHito.descripcion}" (${Number(primerHito.porcentaje)}% - S/ ${Number(primerHito.monto).toLocaleString('es-PE')})`;
+      if (cotizacionId) {
+        try {
+          const hitos = await this.prisma.hitoPago.findMany({
+            where: { cotizacionId },
+            orderBy: { porcentaje: 'asc' }
+          });
+  
+          let descHitos = 'el Hito Inicial (50%)';
+          if (hitos && hitos.length > 0) {
+            const primerHito = hitos[0];
+            descHitos = `el Hito Inicial: "${primerHito.descripcion}" (${Number(primerHito.porcentaje)}% - S/ ${Number(primerHito.monto).toLocaleString('es-PE')})`;
+          }
+  
+          const financeUsers = await this.prisma.usuario.findMany({
+            where: { activo: true },
+          });
+          const targetUsers = financeUsers.filter((u) => {
+            try {
+              const mods = typeof u.modulos === 'string' ? JSON.parse(u.modulos) : u.modulos;
+              return Array.isArray(mods) && mods.includes('finanzas');
+            } catch (e) {
+              return String(u.modulos).includes('finanzas');
+            }
+          });
+          for (const u of targetUsers) {
+            await this.notificacionesService.create({
+              usuarioId: u.id,
+              titulo: 'Facturación Inicial Pendiente',
+              mensaje: `Se ha registrado el proyecto "${proyecto.nombre}" (${proyecto.codigo}). Recuerde facturar ${descHitos}.`,
+              tipo: 'ALERTA',
+            });
+          }
+        } catch (e) {
+          console.error('Error al generar notificación para Finanzas en createProyecto:', e);
         }
-
-        const financeUsers = await this.prisma.usuario.findMany({
-          where: { activo: true },
-        });
-        const targetUsers = financeUsers.filter((u) => {
-          try {
-            const mods = typeof u.modulos === 'string' ? JSON.parse(u.modulos) : u.modulos;
-            return Array.isArray(mods) && mods.includes('finanzas');
-          } catch (e) {
-            return String(u.modulos).includes('finanzas');
+  
+        // NUEVA LÓGICA: Crear Adelantos automáticos si la cotización tiene hitos COBRADOS
+        const hitosCobrados = await this.prisma.hitoPago.findMany({
+          where: {
+            cotizacionId: cotizacionId,
+            estado: 'COBRADO'
           }
         });
-        for (const u of targetUsers) {
-          await this.notificacionesService.create({
-            usuarioId: u.id,
-            titulo: 'Facturación Inicial Pendiente',
-            mensaje: `Se ha registrado el proyecto "${proyecto.nombre}" (${proyecto.codigo}). Recuerde facturar ${descHitos}.`,
-            tipo: 'ALERTA',
+  
+        for (const hito of hitosCobrados) {
+          await this.prisma.adelantoProyecto.create({
+            data: {
+              id: uuidv4(),
+              proyectoId: proyecto.id,
+              monto: Number(hito.monto),
+              fechaRecibido: new Date(),
+              metodo: 'TRANSFERENCIA',
+              referencia: `Hito: ${hito.descripcion}`,
+              saldoDisponible: Number(hito.monto),
+              montoAplicado: 0,
+              observaciones: `Cargado automáticamente desde Cotización ${cotizacion?.codigo}`,
+              registradoPorId: user?.id || 'SISTEMA',
+              updatedAt: new Date()
+            }
           });
         }
-      } catch (e) {
-        console.error('Error al generar notificación para Finanzas en createProyecto:', e);
-      }
-
-      // NUEVA LÓGICA: Crear Adelantos automáticos si la cotización tiene hitos COBRADOS
-      const hitosCobrados = await this.prisma.hitoPago.findMany({
-        where: {
-          cotizacionId: cotizacionId,
-          estado: 'COBRADO'
-        }
-      });
-
-      for (const hito of hitosCobrados) {
-        await this.prisma.adelantoProyecto.create({
-          data: {
-            id: uuidv4(),
-            proyectoId: proyecto.id,
-            monto: Number(hito.monto),
-            fechaRecibido: new Date(),
-            metodo: 'TRANSFERENCIA',
-            referencia: `Hito: ${hito.descripcion}`,
-            saldoDisponible: Number(hito.monto),
-            montoAplicado: 0,
-            observaciones: `Cargado automáticamente desde Cotización ${cotizacion.codigo}`,
-            registradoPorId: user?.id || 'SISTEMA',
-            updatedAt: new Date()
-          }
-        });
       }
 
       await this.registrarHistorial(
@@ -1057,6 +1068,8 @@ export class OperacionesService {
       );
       throw new BadRequestException('Actividad bloqueada por validación.');
     }
+
+    console.log('[updateActividad] progreso recibido:', dto.progreso, '| estado:', dto.estado, '| oldProgreso:', oldActividad.progreso, '| oldEstado:', oldActividad.estado);
 
     let nuevoProgreso = dto.progreso;
     let nuevoEstado = dto.estado;
