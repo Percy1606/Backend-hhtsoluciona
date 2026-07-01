@@ -237,6 +237,7 @@ export class OperacionesService {
       this.prisma.proyecto.findMany({
         where,
         include: {
+          cliente: true,
           responsablePrincipal: true,
           cotizacionOrigen: { select: { estado: true, monto: true } },
           actividades: {
