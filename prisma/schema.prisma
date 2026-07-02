@@ -270,6 +270,7 @@ model Cliente {
   clasificacion       ClasificacionCliente @default(RENTABLE)
   esClienteReal       Boolean              @default(false)
   etapaComercial      String
+  creadoPor           String?
 
   interacciones       Interaccion[]
   actividadesComerciales ActividadComercial[]

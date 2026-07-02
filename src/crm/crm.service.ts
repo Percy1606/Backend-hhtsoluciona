@@ -117,7 +117,7 @@ export class CrmService {
 
       const enhancedData = data.map(c => ({
         ...c,
-        creadoPor: logMap.get(c.id) || c.asignadoA
+        creadoPor: c.creadoPor || logMap.get(c.id) || c.asignadoA
       }));
 
       return {
@@ -163,7 +163,7 @@ export class CrmService {
 
     return {
       ...cliente,
-      creadoPor: (log as any)?.usuario?.nombre || cliente.asignadoA,
+      creadoPor: cliente.creadoPor || (log as any)?.usuario?.nombre || cliente.asignadoA,
     };
   }
 
@@ -235,6 +235,7 @@ export class CrmService {
           ventaProyectada: dto.ventaProyectada || 0,
           temperatura: dto.temperatura || 'Tibio',
           semaforo: dto.semaforo || 'Verde',
+          creadoPor: user?.nombre || null,
         },
       });
 
@@ -347,6 +348,12 @@ export class CrmService {
         data.hallazgosTecnicos = parseJson(hallazgosTecnicos);
       if (solucionesPropuestas !== undefined)
         data.solucionesPropuestas = parseJson(solucionesPropuestas);
+
+      if (dto.asignadoA && dto.asignadoA !== currentCliente.asignadoA) {
+        if (!currentCliente.creadoPor) {
+          data.creadoPor = currentCliente.asignadoA;
+        }
+      }
 
       const cliente = await this.prisma.cliente.update({
         where: { id },
@@ -486,12 +493,35 @@ export class CrmService {
   }
 
   async createInteraccion(dto: CreateInteraccionDto) {
-    return this.prisma.interaccion.create({
+    const interaccion = await this.prisma.interaccion.create({
       data: {
         ...dto,
         fecha: dto.fecha ? new Date(dto.fecha) : new Date(),
       },
     });
+
+    if (dto.clientId) {
+      const cliente = await this.prisma.cliente.findUnique({
+        where: { id: dto.clientId }
+      });
+      if (cliente) {
+        let nuevaEtapa = cliente.etapaComercial;
+        if (cliente.etapaComercial?.toUpperCase() === 'PROSPECTO') {
+          nuevaEtapa = 'Seguimiento';
+        }
+        await this.prisma.cliente.update({
+          where: { id: dto.clientId },
+          data: {
+            asignadoA: dto.usuario || cliente.asignadoA,
+            etapaComercial: nuevaEtapa,
+            ultimoContacto: interaccion.fecha,
+            creadoPor: cliente.creadoPor || cliente.asignadoA
+          }
+        });
+      }
+    }
+
+    return interaccion;
   }
 
   async createActividadComercial(dto: any) {
