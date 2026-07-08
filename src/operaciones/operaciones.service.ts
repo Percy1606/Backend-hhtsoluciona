@@ -1494,7 +1494,7 @@ export class OperacionesService {
         data: {
           clientId: ficha.clienteId,
           fecha: new Date(),
-          tipo: 'Visita',
+          tipo: 'Visita Técnica',
           accion: 'Visita Técnica Programada',
           observaciones: `Visita agendada para el ${fechaFmt}. Técnico: ${ficha.tecnico.nombre}. ${ficha.observaciones ? 'Notas: ' + ficha.observaciones : ''}`,
           usuario: user?.nombre || 'SISTEMA',
