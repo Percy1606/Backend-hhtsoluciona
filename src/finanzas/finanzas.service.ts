@@ -1029,8 +1029,8 @@ export class FinanzasService {
     if (!user) throw new NotFoundException('Usuario no encontrado');
 
     const isAdmin = user.rol === 'ADMIN';
-    // SUPERVISOR o ADMIN pueden actuar como Finanzas (Mellani)
-    const canApproveFinanzas = user.rol === 'ADMIN' || user.rol === 'SUPERVISOR';
+    // SUPERVISOR, ADMIN o FINANZAS pueden actuar como Finanzas (Mellani)
+    const canApproveFinanzas = user.rol === 'ADMIN' || user.rol === 'SUPERVISOR' || user.rol === 'FINANZAS';
 
     return this.prisma.$transaction(async (tx) => {
       const dataToUpdate: any = {};
