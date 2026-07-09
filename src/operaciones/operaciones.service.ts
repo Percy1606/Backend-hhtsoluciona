@@ -239,6 +239,7 @@ export class OperacionesService {
         include: {
           cliente: true,
           responsablePrincipal: true,
+          ordenesDeServicio: true,
           cotizacionOrigen: { select: { estado: true, monto: true } },
           actividades: {
             include: {

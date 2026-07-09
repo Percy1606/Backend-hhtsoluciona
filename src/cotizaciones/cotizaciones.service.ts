@@ -357,29 +357,8 @@ export class CotizacionesService {
         return;
       }
 
-      // Validación: cliente sin proyecto activo
-      const proyectoActivo = await this.prisma.proyecto.findFirst({
-        where: {
-          clientId: cotizacion.clientId,
-          estado: { not: 'Finalizado' },
-        },
-      });
-      if (proyectoActivo) {
-        console.warn(`[AutoGen] Cliente ya tiene proyecto activo (${proyectoActivo.codigo}). Proyecto no generado automáticamente.`);
-        // Notificar al admin del bloqueo
-        const admins = await this.prisma.usuario.findMany({ where: { rol: 'ADMIN' } });
-        for (const admin of admins) {
-          await this.notificacionesService.create({
-            usuarioId: admin.id,
-            titulo: '⚠️ Proyecto no generado automáticamente',
-            mensaje: `La cotización ${cotizacion.codigo} fue ganada, pero el cliente ya tiene el proyecto activo "${proyectoActivo.nombre}". Genera el proyecto manualmente cuando corresponda.`,
-            tipo: 'SISTEMA',
-          });
-        }
-        return;
-      }
-
-      // Obtener responsable por defecto o el asignado
+      // Se eliminó la validación de cliente con proyecto activo para generar
+      // una Orden de Servicio independiente por cada Cotización ganada.
       const responsablePorDefecto = liderId 
         ? await this.prisma.responsable.findUnique({ where: { id: liderId } })
         : await this.prisma.responsable.findFirst({
