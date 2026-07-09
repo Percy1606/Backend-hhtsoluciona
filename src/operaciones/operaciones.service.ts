@@ -399,15 +399,21 @@ export class OperacionesService {
     });
 
     const costoManoObra = gastos
-      .filter((g) => g.tipo === 'PERSONAL' || g.tipo === 'PLANILLA')
+      .filter((g) => g.tipo === 'PERSONAL' || g.tipo === 'PLANILLA' || g.categoriaDistribucion === 'MANO_OBRA')
       .reduce((sum, g) => sum + Number(g.montoTotal || 0), 0);
 
+    const costoMaterialesLogistica = gastos
+      .filter((g) => g.categoriaDistribucion === 'MATERIALES')
+      .reduce((sum, g) => sum + Number(g.montoTotal || 0), 0);
+      
+    const costoMaterialesTotal = costoMateriales + costoMaterialesLogistica;
+
     const costoServiciosYVarios = gastos
-      .filter((g) => g.tipo !== 'PERSONAL' && g.tipo !== 'PLANILLA')
+      .filter((g) => g.tipo !== 'PERSONAL' && g.tipo !== 'PLANILLA' && g.categoriaDistribucion !== 'MANO_OBRA' && g.categoriaDistribucion !== 'MATERIALES')
       .reduce((sum, g) => sum + Number(g.montoTotal || 0), 0);
 
     const costoTotalReal =
-      costoMateriales + costoManoObra + costoServiciosYVarios;
+      costoMaterialesTotal + costoManoObra + costoServiciosYVarios;
     const presupuesto = Number(proyecto.costoPresupuestado || 0);
     const venta = Number(proyecto.cotizacionOrigen?.monto || 0);
 
@@ -419,7 +425,7 @@ export class OperacionesService {
       where: { id },
       data: {
         costoTotalReal: costoTotalReal,
-        consumoMaterialesReal: costoMateriales,
+        consumoMaterialesReal: costoMaterialesTotal,
         consumoManoObraReal: costoManoObra,
         consumoServiciosReal: costoServiciosYVarios,
         utilidadProyectada: utilidadReal,

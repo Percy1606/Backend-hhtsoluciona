@@ -2555,15 +2555,21 @@ export class FinanzasService {
 
     // 2.3 Mano de Obra
     const costoManoObra = p.gastos
-      .filter((g) => g.tipo === 'PERSONAL' || g.tipo === 'PLANILLA')
+      .filter((g) => g.tipo === 'PERSONAL' || g.tipo === 'PLANILLA' || g.categoriaDistribucion === 'MANO_OBRA')
       .reduce((sum, g) => sum + Number(g.montoTotal), 0);
+
+    const costoMaterialesLogistica = p.gastos
+      .filter((g) => g.categoriaDistribucion === 'MATERIALES')
+      .reduce((sum, g) => sum + Number(g.montoTotal), 0);
+      
+    const costoMaterialesTotal = costoMaterialesKardex + costoMaterialesLogistica;
 
     // 2.4 Otros Gastos
     const costoVarios = p.gastos
-      .filter((g) => g.tipo !== 'PERSONAL' && g.tipo !== 'PLANILLA')
+      .filter((g) => g.tipo !== 'PERSONAL' && g.tipo !== 'PLANILLA' && g.categoriaDistribucion !== 'MANO_OBRA' && g.categoriaDistribucion !== 'MATERIALES')
       .reduce((sum, g) => sum + Number(g.montoTotal), 0);
 
-    const costoTotalReal = costoMaterialesKardex + costoManoObra + costoVarios;
+    const costoTotalReal = costoMaterialesTotal + costoManoObra + costoVarios;
 
     // 3. INDICADORES
     const utilidadReal = montoCotizado - costoTotalReal;
@@ -2575,7 +2581,7 @@ export class FinanzasService {
       where: { id: proyectoId },
       data: {
         costoTotalReal,
-        consumoMaterialesReal: costoMaterialesKardex,
+        consumoMaterialesReal: costoMaterialesTotal,
         consumoManoObraReal: costoManoObra,
         consumoServiciosReal: costoVarios,
         utilidadProyectada: utilidadReal,
