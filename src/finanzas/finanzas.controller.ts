@@ -273,9 +273,9 @@ export class FinanzasController {
   @Post('gastos/:id/aprobar')
   @UseGuards(ModulesGuard)
   @Modules('finanzas')
-  approveGasto(@Req() req: any, @Param('id') id: string) {
+  approveGasto(@Req() req: any, @Param('id') id: string, @Body('cajaId') cajaId?: string) {
     const usuarioId = req.user.id || req.user.sub || 'system';
-    return this.finanzasService.approveGasto(id, usuarioId);
+    return this.finanzasService.approveGasto(id, usuarioId, cajaId);
   }
 
   // ============================================

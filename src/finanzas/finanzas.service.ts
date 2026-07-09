@@ -1016,7 +1016,7 @@ export class FinanzasService {
     });
   }
 
-  async approveGasto(id: string, usuarioId: string) {
+  async approveGasto(id: string, usuarioId: string, cajaId?: string) {
     const gasto = await this.prisma.gasto.findUnique({
       where: { id },
       include: { proyecto: true },
@@ -1035,6 +1035,10 @@ export class FinanzasService {
     return this.prisma.$transaction(async (tx) => {
       const dataToUpdate: any = {};
       let needsBlocking = false;
+
+      if (cajaId) {
+        dataToUpdate.cajaId = cajaId;
+      }
 
       if (gasto.nivelAprobacion === 'PENDIENTE_FINANZAS' || gasto.nivelAprobacion === 'PENDIENTE_GERENCIA') {
         if (!canApproveFinanzas) {
