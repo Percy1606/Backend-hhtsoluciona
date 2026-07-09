@@ -1043,14 +1043,9 @@ export class FinanzasService {
         dataToUpdate.aprobadorFinanzasId = usuarioId;
         dataToUpdate.nivelAprobacion = 'APROBADO';
 
-        // Si es una solicitud, pasa a APROBADO (Fondos bloqueados/reservados)
-        if (gasto.estado === 'SOLICITADO') {
+        // Si es una solicitud o está pendiente, pasa a APROBADO (Fondos bloqueados/reservados)
+        if (gasto.estado === 'SOLICITADO' || gasto.estado === 'PENDIENTE') {
           dataToUpdate.estado = 'APROBADO';
-          needsBlocking = true;
-        } 
-        // Si por alguna razón el estado no fuera PENDIENTE ni APROBADO ni PAGADO, lo forzamos a PENDIENTE
-        else if (gasto.estado !== 'PENDIENTE' && gasto.estado !== 'APROBADO' && gasto.estado !== 'PAGADO') {
-          dataToUpdate.estado = 'PENDIENTE';
           needsBlocking = true;
         }
       } else {
