@@ -6,6 +6,7 @@ import {
   IsUUID,
   IsEnum,
   IsDateString,
+  IsBoolean,
 } from 'class-validator';
 import {
   EstadoGasto,
@@ -65,6 +66,22 @@ export class CreateGastoDto {
   @IsNumber()
   @IsNotEmpty()
   montoTotal: number;
+
+  @IsString()
+  @IsOptional()
+  tipoComprobante?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  aplicaImpuestos?: boolean;
+
+  @IsNumber()
+  @IsOptional()
+  montoSubtotal?: number;
+
+  @IsNumber()
+  @IsOptional()
+  montoIgv?: number;
 
   @IsDateString()
   @IsNotEmpty()

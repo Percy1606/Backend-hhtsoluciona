@@ -3249,4 +3249,92 @@ export class FinanzasService {
       }
     }
   }
+  
+  // ============================================
+  // IMPUESTOS Y DECLARACIONES
+  // ============================================
+  
+  async getImpuestosMensuales(mes: number, anio: number) {
+    const startDate = new Date(anio, mes - 1, 1);
+    const endDate = new Date(anio, mes, 0, 23, 59, 59);
+
+    const ventas = await this.prisma.factura.aggregate({
+      _sum: {
+        montoSubtotal: true,
+        montoIgv: true,
+        montoTotal: true,
+      },
+      where: {
+        fechaEmision: {
+          gte: startDate,
+          lte: endDate,
+        },
+        estado: { not: 'ANULADA' },
+      }
+    });
+
+    const compras = await this.prisma.gasto.aggregate({
+      _sum: {
+        montoSubtotal: true,
+        montoIgv: true,
+        montoTotal: true,
+      },
+      where: {
+        fechaEmision: {
+          gte: startDate,
+          lte: endDate,
+        },
+        tipoComprobante: 'FACTURA',
+        aplicaImpuestos: true,
+        estado: { not: 'ANULADO' },
+      }
+    });
+
+    const subtotalVentas = Number(ventas._sum.montoSubtotal) || 0;
+    const igvVentas = Number(ventas._sum.montoIgv) || 0;
+    
+    const subtotalCompras = Number(compras._sum.montoSubtotal) || 0;
+    const igvCompras = Number(compras._sum.montoIgv) || 0;
+
+    const igvPorPagar = Math.max(0, igvVentas - igvCompras);
+
+    let porcentajeRenta = 1.5;
+    const configPath = './tax_config.json';
+    try {
+      const fs = require('fs');
+      if (fs.existsSync(configPath)) {
+        const raw = fs.readFileSync(configPath, 'utf8');
+        const config = JSON.parse(raw);
+        porcentajeRenta = config.porcentajeRenta ?? 1.5;
+      }
+    } catch (e) {}
+
+    const impuestoRenta = (subtotalVentas * porcentajeRenta) / 100;
+    const montoFinalSunat = igvPorPagar + impuestoRenta;
+
+    return {
+      mes,
+      anio,
+      ventas: {
+        subtotal: subtotalVentas,
+        igv: igvVentas,
+      },
+      compras: {
+        subtotal: subtotalCompras,
+        igv: igvCompras,
+      },
+      igvPorPagar,
+      porcentajeRenta,
+      impuestoRenta,
+      montoFinalSunat,
+      creditoFiscalAcumulado: (igvVentas - igvCompras < 0) ? Math.abs(igvVentas - igvCompras) : 0,
+    };
+  }
+
+  async updateTaxConfig(porcentajeRenta: number) {
+    const configPath = './tax_config.json';
+    const fs = require('fs');
+    fs.writeFileSync(configPath, JSON.stringify({ porcentajeRenta }));
+    return { success: true, porcentajeRenta };
+  }
 }

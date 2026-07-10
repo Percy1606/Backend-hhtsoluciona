@@ -724,5 +724,29 @@ export class FinanzasController {
   toggleGastoFijo(@Param('id') id: string) {
     return this.finanzasService.toggleGastoFijo(id);
   }
+
+  // ============================================
+  // IMPUESTOS
+  // ============================================
+
+  @Get('impuestos')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  getImpuestosMensuales(@Query('mes') mes: string, @Query('anio') anio: string) {
+    if (!mes || !anio) {
+      const now = new Date();
+      mes = (now.getMonth() + 1).toString();
+      anio = now.getFullYear().toString();
+    }
+    return this.finanzasService.getImpuestosMensuales(parseInt(mes), parseInt(anio));
+  }
+
+  @Post('impuestos/config')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  updateTaxConfig(@Body('porcentajeRenta') porcentajeRenta: number) {
+    if (porcentajeRenta === undefined) throw new BadRequestException('Falta porcentajeRenta');
+    return this.finanzasService.updateTaxConfig(Number(porcentajeRenta));
+  }
 }
 

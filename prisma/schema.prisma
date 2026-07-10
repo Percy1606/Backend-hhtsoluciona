@@ -1081,6 +1081,11 @@ model Gasto {
   montoTotal       Decimal      @db.Decimal(18, 2)
   saldoPendiente   Decimal      @db.Decimal(18, 2)
 
+  tipoComprobante  String?      @default("FACTURA")
+  aplicaImpuestos  Boolean?     @default(false)
+  montoSubtotal    Decimal?     @default(0.00) @db.Decimal(18, 2)
+  montoIgv         Decimal?     @default(0.00) @db.Decimal(18, 2)
+
   fechaEmision     DateTime     @default(now())
   fechaVencimiento DateTime?
   fechaPago        DateTime?
