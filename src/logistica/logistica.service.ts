@@ -1048,7 +1048,8 @@ export class LogisticaService {
     const totalConsumido = gastos.reduce((acc, g) => acc + Number(g.montoTotal), 0);
     const saldoDisponible = costoPresupuestado - totalConsumido;
 
-    if (montoNuevaOrden > saldoDisponible && !aprobarConCredito) {
+    const isSobregiroAutorizado = proyecto.descripcion?.includes('[SOBREGIRO_AUTORIZADO]');
+    if (montoNuevaOrden > saldoDisponible && !aprobarConCredito && !isSobregiroAutorizado) {
       throw new BadRequestException(`No existe saldo suficiente para aprobar esta compra. La orden excede el presupuesto disponible del proyecto en S/ ${(montoNuevaOrden - saldoDisponible).toFixed(2)}. \n\nPresupuesto: S/ ${costoPresupuestado.toFixed(2)} \nComprometido/Ejecutado: S/ ${totalConsumido.toFixed(2)} \nSaldo Disponible: S/ ${saldoDisponible.toFixed(2)} \nNueva Compra: S/ ${montoNuevaOrden.toFixed(2)}`);
     }
   }
