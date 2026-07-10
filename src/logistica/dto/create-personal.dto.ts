@@ -60,6 +60,18 @@ export class CreatePersonalDto {
 export class UpdatePersonalDto {
   @IsString()
   @IsOptional()
+  proyectoId?: string;
+
+  @IsString()
+  @IsOptional()
+  proyectoCodigo?: string;
+
+  @IsString()
+  @IsOptional()
+  proyectoNombre?: string;
+
+  @IsString()
+  @IsOptional()
   nombre?: string;
 
   @IsString()
