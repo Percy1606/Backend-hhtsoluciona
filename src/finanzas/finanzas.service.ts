@@ -2715,9 +2715,6 @@ export class FinanzasService {
     return this.prisma.proyecto.findMany({
       where: {
         estado: { not: 'Finalizado' },
-        cotizacionOrigen: {
-          estado: { in: ['Aprobada', 'Ganada', 'Orden de Servicio', 'Orden de servicio'] }
-        },
       },
       select: {
         id: true,
