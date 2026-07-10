@@ -552,10 +552,10 @@ export class OperacionesService {
         return updatedProject as any; // Se castea para ignorar el include adicional en el tipo de retorno si lo hubiera
       }
 
-      throw new BadRequestException({
-        error: 'Cliente con Proyecto Activo',
-        message: `El cliente ya tiene un proyecto operativo vigente: "${existingActiveProject.nombre}" (${existingActiveProject.codigo}). Debe finalizar el proyecto actual antes de registrar uno nuevo.`,
-      });
+      // throw new BadRequestException({
+      //   error: 'Cliente con Proyecto Activo',
+      //   message: `El cliente ya tiene un proyecto operativo vigente: "${existingActiveProject.nombre}" (${existingActiveProject.codigo}). Debe finalizar el proyecto actual antes de registrar uno nuevo.`,
+      // });
     }
 
     let cotizacion = null;
