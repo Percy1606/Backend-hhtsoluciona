@@ -6,6 +6,7 @@ import {
   IsArray,
   ValidateNested,
   Min,
+  IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -52,4 +53,8 @@ export class CreateOrdenCompraDto {
   @ValidateNested({ each: true })
   @Type(() => OrdenItemDto)
   items: OrdenItemDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  aprobarConCredito?: boolean;
 }

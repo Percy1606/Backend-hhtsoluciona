@@ -215,7 +215,7 @@ export class LogisticaService {
     // SE CREA EL GASTO EN ESTADO SOLICITADO PARA QUE FINANZAS ASIGNE LA CAJA Y EJECUTE EL PAGO/BLOQUEO.
 
     if (dto.proyectoId && dto.proyectoId !== 'none' && dto.proyectoId !== '') {
-      await this.validarReglasFinancieras(dto.proyectoId, montoTotal);
+      await this.validarReglasFinancieras(dto.proyectoId, montoTotal, undefined, dto.aprobarConCredito);
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -397,7 +397,7 @@ export class LogisticaService {
 
     const gastoVinculado = await this.prisma.gasto.findFirst({ where: { ordenCompraId: id } });
     if (gastoVinculado && gastoVinculado.proyectoId) {
-      await this.validarReglasFinancieras(gastoVinculado.proyectoId, montoTotal, gastoVinculado.id);
+      await this.validarReglasFinancieras(gastoVinculado.proyectoId, montoTotal, gastoVinculado.id, (dto as any).aprobarConCredito);
     }
 
       return this.prisma.ordenCompra.update({
@@ -1025,7 +1025,7 @@ export class LogisticaService {
     };
   }
 
-  async validarReglasFinancieras(proyectoId: string, montoNuevaOrden: number, excludeGastoId?: string) {
+  async validarReglasFinancieras(proyectoId: string, montoNuevaOrden: number, excludeGastoId?: string, aprobarConCredito?: boolean) {
     const proyecto = await this.prisma.proyecto.findUnique({
       where: { id: proyectoId },
     });
@@ -1048,7 +1048,7 @@ export class LogisticaService {
     const totalConsumido = gastos.reduce((acc, g) => acc + Number(g.montoTotal), 0);
     const saldoDisponible = costoPresupuestado - totalConsumido;
 
-    if (montoNuevaOrden > saldoDisponible) {
+    if (montoNuevaOrden > saldoDisponible && !aprobarConCredito) {
       throw new BadRequestException(`No existe saldo suficiente para aprobar esta compra. La orden excede el presupuesto disponible del proyecto en S/ ${(montoNuevaOrden - saldoDisponible).toFixed(2)}. \n\nPresupuesto: S/ ${costoPresupuestado.toFixed(2)} \nComprometido/Ejecutado: S/ ${totalConsumido.toFixed(2)} \nSaldo Disponible: S/ ${saldoDisponible.toFixed(2)} \nNueva Compra: S/ ${montoNuevaOrden.toFixed(2)}`);
     }
   }
