@@ -13,7 +13,7 @@ export class CrmCronService {
   ) {}
 
   // Se ejecuta de Lunes a Viernes a las 17:00 (5 PM) hora de Perú
-  @Cron('0 17 * * 1-5', { timeZone: 'America/Lima' })
+  // @Cron('0 17 * * 1-5', { timeZone: 'America/Lima' }) // Deshabilitado por pedido del usuario
   async evaluacionCierreJornada() {
     this.logger.log('Iniciando evaluación diaria de Cierre de Jornada Comercial (17:00 PET)...');
 
