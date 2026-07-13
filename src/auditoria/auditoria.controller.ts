@@ -40,4 +40,14 @@ export class AuditoriaController {
   purgarManual() {
     return this.auditoriaService.purgarManual();
   }
+
+  /**
+   * Limpia TODO el ruido (CREAR_* y ACTUALIZAR_*) sin importar la fecha.
+   * Solo accesible por ADMIN.
+   */
+  @Delete('limpiar-ruido')
+  @Roles('ADMIN')
+  limpiarRuido() {
+    return this.auditoriaService.limpiarRuido();
+  }
 }

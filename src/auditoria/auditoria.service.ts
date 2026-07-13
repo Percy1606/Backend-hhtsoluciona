@@ -211,4 +211,26 @@ export class AuditoriaService {
       fechaLimite: fechaLimite.toLocaleDateString('es-PE'),
     };
   }
+
+  /**
+   * Limpia TODO el ruido de auditoría sin importar la fecha:
+   * Elimina todos los logs CREAR_* y ACTUALIZAR_*.
+   * Solo conserva los ELIMINAR_* (permanentes) y cualquier otro prefijo.
+   */
+  async limpiarRuido(): Promise<{ eliminados: number }> {
+    const resultado = await (this.prisma as any).auditLog.deleteMany({
+      where: {
+        OR: [
+          { accion: { startsWith: 'CREAR' } },
+          { accion: { startsWith: 'ACTUALIZAR' } },
+        ],
+      },
+    });
+
+    this.logger.log(
+      `Limpieza de ruido: ${resultado.count} logs CREAR/ACTUALIZAR eliminados por admin.`,
+    );
+
+    return { eliminados: resultado.count };
+  }
 }
