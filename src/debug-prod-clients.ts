@@ -18,8 +18,7 @@ async function main() {
         orderBy: { fecha: 'desc' },
         select: {
           usuario: true,
-          fecha: true,
-          createdAt: true
+          fecha: true
         }
       }
     }
@@ -28,7 +27,7 @@ async function main() {
   const getRealCreator = (c: any) => {
     if (c.creadoPor) return c.creadoPor;
     if (c.interacciones && c.interacciones.length > 0) {
-      const sorted = [...c.interacciones].sort((a: any, b: any) => new Date(a.fecha || a.createdAt).getTime() - new Date(b.fecha || b.createdAt).getTime());
+      const sorted = [...c.interacciones].sort((a: any, b: any) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
       if (sorted[0]?.usuario) return sorted[0].usuario;
     }
     return c.asignadoA;
