@@ -36,34 +36,24 @@ async function main() {
   console.log('=== RESUMEN DE CLIENTES ACTIVOS EN PRODUCCIÓN ===');
   console.log('Total en DB:', clients.length);
 
-  const creators: Record<string, any[]> = {};
-  const assignees: Record<string, any[]> = {};
+  const rawCreators: Record<string, number> = {};
+  const nullCreatorsByAssignee: Record<string, number> = {};
 
   for (const c of clients) {
-    const creator = (getRealCreator(c) || 'Sin Creador').trim();
-    const assignee = (c.asignadoA || 'Sin Asignar').trim();
+    const rawCreator = c.creadoPor || 'NULL';
+    rawCreators[rawCreator] = (rawCreators[rawCreator] || 0) + 1;
 
-    if (!creators[creator]) creators[creator] = [];
-    creators[creator].push(c);
-
-    if (!assignees[assignee]) assignees[assignee] = [];
-    assignees[assignee].push(c);
+    if (!c.creadoPor) {
+      const assignee = c.asignadoA || 'SIN_ASIGNAR';
+      nullCreatorsByAssignee[assignee] = (nullCreatorsByAssignee[assignee] || 0) + 1;
+    }
   }
 
-  console.log('\n--- TOTALES POR CREADOR REAL (getRealCreator) ---');
-  for (const [creator, list] of Object.entries(creators)) {
-    console.log(`Creador: "${creator}" -> Total: ${list.length}`);
-    const stages = list.reduce((acc, cl) => {
-      acc[cl.etapaComercial] = (acc[cl.etapaComercial] || 0) + 1;
-      return acc;
-    }, {});
-    console.log(`  Desglose por Etapa Comercial:`, stages);
-  }
+  console.log('\n--- VALORES CRUDOS DEL CAMPO creadoPor EN DB ---');
+  console.table(rawCreators);
 
-  console.log('\n--- TOTALES POR ASESOR ASIGNADO (asignadoA) ---');
-  for (const [assignee, list] of Object.entries(assignees)) {
-    console.log(`Asignado a: "${assignee}" -> Total: ${list.length}`);
-  }
+  console.log('\n--- REGISTROS CON creadoPor = NULL AGRUPADOS POR VENDEDOR ASIGNADO ---');
+  console.table(nullCreatorsByAssignee);
 
   process.exit(0);
 }
