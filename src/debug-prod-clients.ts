@@ -33,27 +33,64 @@ async function main() {
     return c.asignadoA;
   };
 
-  console.log('=== RESUMEN DE CLIENTES ACTIVOS EN PRODUCCIÓN ===');
-  console.log('Total en DB:', clients.length);
-
-  const rawCreators: Record<string, number> = {};
-  const nullCreatorsByAssignee: Record<string, number> = {};
-
-  for (const c of clients) {
-    const rawCreator = c.creadoPor || 'NULL';
-    rawCreators[rawCreator] = (rawCreators[rawCreator] || 0) + 1;
-
-    if (!c.creadoPor) {
-      const assignee = c.asignadoA || 'SIN_ASIGNAR';
-      nullCreatorsByAssignee[assignee] = (nullCreatorsByAssignee[assignee] || 0) + 1;
+  console.log('=== BUSCANDO INTERACCIONES DE CLIENTES ESPECÍFICOS ===');
+  const targetClients = await prisma.cliente.findMany({
+    where: {
+      deletedAt: null,
+      empresa: {
+        contains: 'ACELIM'
+      }
+    },
+    select: {
+      id: true,
+      empresa: true,
+      creadoPor: true,
+      asignadoA: true,
+      interacciones: {
+        select: {
+          id: true,
+          fecha: true,
+          tipo: true,
+          accion: true,
+          usuario: true,
+          observaciones: true
+        }
+      }
     }
+  });
+
+  const targetClients2 = await prisma.cliente.findMany({
+    where: {
+      deletedAt: null,
+      empresa: {
+        contains: 'NORANDINO'
+      }
+    },
+    select: {
+      id: true,
+      empresa: true,
+      creadoPor: true,
+      asignadoA: true,
+      interacciones: {
+        select: {
+          id: true,
+          fecha: true,
+          tipo: true,
+          accion: true,
+          usuario: true,
+          observaciones: true
+        }
+      }
+    }
+  });
+
+  const allTargets = [...targetClients, ...targetClients2];
+  for (const tc of allTargets) {
+    console.log(`\nCliente: "${tc.empresa}" (ID: ${tc.id})`);
+    console.log(`Asignado a: "${tc.asignadoA}" | Creado por: "${tc.creadoPor}"`);
+    console.log(`Interacciones (${tc.interacciones.length}):`);
+    console.table(tc.interacciones);
   }
-
-  console.log('\n--- VALORES CRUDOS DEL CAMPO creadoPor EN DB ---');
-  console.table(rawCreators);
-
-  console.log('\n--- REGISTROS CON creadoPor = NULL AGRUPADOS POR VENDEDOR ASIGNADO ---');
-  console.table(nullCreatorsByAssignee);
 
   process.exit(0);
 }
