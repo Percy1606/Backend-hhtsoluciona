@@ -1,8 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
+
+// Días de retención para logs no críticos
+const RETENTION_DAYS = 90;
 
 @Injectable()
 export class AuditoriaService {
+  private readonly logger = new Logger(AuditoriaService.name);
+
   constructor(private prisma: PrismaService) {}
 
   async createLog(data: {
@@ -29,6 +35,8 @@ export class AuditoriaService {
     modulo?: string;
     usuarioId?: string;
     search?: string;
+    fechaDesde?: string;
+    fechaHasta?: string;
   }) {
     const page = filters.page || 1;
     const limit = filters.limit || 50;
@@ -37,10 +45,17 @@ export class AuditoriaService {
     const where: any = {};
     if (filters.modulo) where.modulo = filters.modulo;
     if (filters.usuarioId) where.usuarioId = filters.usuarioId;
+    if (filters.fechaDesde || filters.fechaHasta) {
+      where.fechaCreacion = {};
+      if (filters.fechaDesde) where.fechaCreacion.gte = new Date(`${filters.fechaDesde}T00:00:00`);
+      if (filters.fechaHasta) where.fechaCreacion.lte = new Date(`${filters.fechaHasta}T23:59:59`);
+    }
     if (filters.search) {
       where.OR = [
         { accion: { contains: filters.search } },
         { detalles: { path: '$.mensaje', string_contains: filters.search } },
+        { modulo: { contains: filters.search } },
+        { usuario: { nombre: { contains: filters.search } } },
       ];
     }
 
@@ -138,5 +153,62 @@ export class AuditoriaService {
     }
 
     return Object.keys(filtered).length > 0 ? filtered : null;
+  }
+
+  /**
+   * Purga automática nocturna: elimina logs de hace más de RETENTION_DAYS días,
+   * EXCEPTO los que corresponden a acciones de eliminación (críticos y permanentes).
+   * Se ejecuta todos los días a las 02:00 AM (hora de Lima).
+   */
+  @Cron('0 2 * * *', { timeZone: 'America/Lima' })
+  async purgarLogsAntiguos() {
+    const fechaLimite = new Date();
+    fechaLimite.setDate(fechaLimite.getDate() - RETENTION_DAYS);
+
+    try {
+      const resultado = await (this.prisma as any).auditLog.deleteMany({
+        where: {
+          fechaCreacion: { lt: fechaLimite },
+          // Conservar permanentemente cualquier acción de eliminación
+          NOT: {
+            accion: { startsWith: 'ELIMINAR' },
+          },
+        },
+      });
+      this.logger.log(
+        `Purga de auditoría: ${resultado.count} logs eliminados (anteriores a ${fechaLimite.toLocaleDateString('es-PE')}).`,
+      );
+      return resultado.count;
+    } catch (err) {
+      this.logger.error('Error en la purga automática de auditoría:', err);
+      return 0;
+    }
+  }
+
+  /**
+   * Purga manual invocada desde el controlador por un ADMIN.
+   * Misma lógica que la automática.
+   */
+  async purgarManual(): Promise<{ eliminados: number; fechaLimite: string }> {
+    const fechaLimite = new Date();
+    fechaLimite.setDate(fechaLimite.getDate() - RETENTION_DAYS);
+
+    const resultado = await (this.prisma as any).auditLog.deleteMany({
+      where: {
+        fechaCreacion: { lt: fechaLimite },
+        NOT: {
+          accion: { startsWith: 'ELIMINAR' },
+        },
+      },
+    });
+
+    this.logger.log(
+      `Purga manual: ${resultado.count} logs eliminados por admin.`,
+    );
+
+    return {
+      eliminados: resultado.count,
+      fechaLimite: fechaLimite.toLocaleDateString('es-PE'),
+    };
   }
 }
