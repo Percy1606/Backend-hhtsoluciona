@@ -2273,6 +2273,100 @@ export class FinanzasService {
     };
   }
 
+  async getLandingKPIs(startDateStr?: string, endDateStr?: string) {
+    const today = new Date();
+    
+    // Parsear fechas de filtro o usar por defecto
+    const filterStartDate = startDateStr ? new Date(startDateStr) : null;
+    const filterEndDate = endDateStr ? new Date(endDateStr) : null;
+
+    // Para la utilidad, si hay filtro de fecha lo usamos, si no por defecto mes actual
+    const utilityStart = filterStartDate || new Date(today.getFullYear(), today.getMonth(), 1);
+    const utilityEnd = filterEndDate || new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59);
+
+    // Configurar condiciones de filtro
+    const facturaWhere: any = { estado: { in: ['PENDIENTE', 'PAGO_PARCIAL', 'VENCIDA'] as any } };
+    const gastoWhere: any = { estado: 'PENDIENTE' as any };
+    const osWhere: any = { 
+      proyecto: { 
+        estado: { in: ['Planificacion', 'EnEjecucion', 'Detenido'] as any } 
+      } 
+    };
+
+    if (filterStartDate && filterEndDate) {
+      facturaWhere.fechaEmision = { gte: filterStartDate, lte: filterEndDate };
+      gastoWhere.fechaEmision = { gte: filterStartDate, lte: filterEndDate };
+      osWhere.fechaEmision = { gte: filterStartDate, lte: filterEndDate };
+    }
+
+    const [cajas, facturas, gastos, ordenesServicio] = await Promise.all([
+      this.prisma.caja.findMany(),
+      this.prisma.factura.findMany({
+        where: facturaWhere,
+        select: { saldoPendiente: true },
+      }),
+      this.prisma.gasto.findMany({
+        where: gastoWhere,
+        select: { montoTotal: true },
+      }),
+      this.prisma.ordenDeServicio.findMany({
+        where: osWhere,
+        include: {
+          cotizacion: {
+            select: { monto: true, moneda: true }
+          }
+        }
+      })
+    ]);
+
+    const disponiblePEN = cajas.filter(c => c.moneda === 'PEN').reduce((acc, c) => acc + Number(c.saldoDisponible), 0);
+    const disponibleUSD = cajas.filter(c => c.moneda === 'USD').reduce((acc, c) => acc + Number(c.saldoDisponible), 0);
+    
+    const cajaOperativaPEN = cajas.filter(c => c.subtipo === 'OPERATIVA' && c.moneda === 'PEN').reduce((acc, c) => acc + Number(c.saldoDisponible), 0);
+    const cajaOperativaUSD = cajas.filter(c => c.subtipo === 'OPERATIVA' && c.moneda === 'USD').reduce((acc, c) => acc + Number(c.saldoDisponible), 0);
+
+    const fondoReservaPEN = cajas.filter(c => c.subtipo === 'RESERVA' && c.moneda === 'PEN').reduce((acc, c) => acc + Number(c.saldoDisponible), 0);
+    const fondoReservaUSD = cajas.filter(c => c.subtipo === 'RESERVA' && c.moneda === 'USD').reduce((acc, c) => acc + Number(c.saldoDisponible), 0);
+
+    const cuentasPorCobrar = facturas.reduce((acc, f) => acc + Number(f.saldoPendiente), 0);
+    const cuentasPorPagar = gastos.reduce((acc, g) => acc + Number(g.montoTotal), 0);
+
+    const osCantidad = ordenesServicio.length;
+    const osMontoPEN = ordenesServicio.filter(os => os.cotizacion?.moneda === 'PEN').reduce((acc, os) => acc + Number(os.cotizacion?.monto || 0), 0);
+    const osMontoUSD = ordenesServicio.filter(os => os.cotizacion?.moneda === 'USD').reduce((acc, os) => acc + Number(os.cotizacion?.monto || 0), 0);
+
+    const [pagosMes, gastosPagadosMes] = await Promise.all([
+      this.prisma.pago.aggregate({
+        where: { fechaPago: { gte: utilityStart, lte: utilityEnd } },
+        _sum: { monto: true }
+      }),
+      this.prisma.gasto.aggregate({
+        where: { estado: 'PAGADO' as any, fechaPago: { gte: utilityStart, lte: utilityEnd } },
+        _sum: { montoTotal: true }
+      })
+    ]);
+    const utilidadAcumuladaMes = Number(pagosMes._sum.monto || 0) - Number(gastosPagadosMes._sum.montoTotal || 0);
+
+    const proyeccion = await this.get90DayProjection();
+    const flujoProyectado90 = proyeccion.find(p => p.dias === 90)?.saldoProyectado || 0;
+
+    return {
+      disponiblePEN,
+      disponibleUSD,
+      cajaOperativa: { PEN: cajaOperativaPEN, USD: cajaOperativaUSD },
+      fondoReserva: { PEN: fondoReservaPEN, USD: fondoReservaUSD },
+      cuentasPorCobrar,
+      cuentasPorPagar,
+      ordenesServicio: {
+        cantidad: osCantidad,
+        montoPEN: osMontoPEN,
+        montoUSD: osMontoUSD
+      },
+      utilidadAcumuladaMes,
+      flujoProyectado90
+    };
+  }
+
   async getDashboardStats(mes?: number, anio?: number) {
     const today = new Date();
     const targetAnio = anio || today.getFullYear();

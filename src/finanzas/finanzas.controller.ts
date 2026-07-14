@@ -111,6 +111,17 @@ export class FinanzasController {
     return this.finanzasService.getGlobalKPIs();
   }
 
+  @Get('landing-kpis')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  getLandingKPIs(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.finanzasService.getLandingKPIs(startDate, endDate);
+  }
+
+
   @Get('cash-flow')
   @UseGuards(ModulesGuard)
   @Modules('finanzas')
