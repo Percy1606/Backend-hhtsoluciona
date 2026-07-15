@@ -2805,9 +2805,9 @@ export class FinanzasService {
   // BANDEJA FINANZAS (Fase 3)
   // ============================================
 
-  async getProyectosPendientesFinanzas() {
+  async getProyectosPendientesFinanzas(todas: boolean = false) {
     return this.prisma.proyecto.findMany({
-      where: {
+      where: todas ? {} : {
         estado: { not: 'Finalizado' },
       },
       select: {

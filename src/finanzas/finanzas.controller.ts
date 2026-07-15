@@ -526,8 +526,8 @@ export class FinanzasController {
   @Get('bandeja-proyectos')
   @UseGuards(ModulesGuard)
   @Modules('finanzas')
-  getProyectosPendientesFinanzas() {
-    return this.finanzasService.getProyectosPendientesFinanzas();
+  getProyectosPendientesFinanzas(@Query('todas') todas?: string) {
+    return this.finanzasService.getProyectosPendientesFinanzas(todas === 'true');
   }
 
   @Patch('bandeja-proyectos/:id')
