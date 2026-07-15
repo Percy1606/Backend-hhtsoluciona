@@ -2462,7 +2462,7 @@ export class FinanzasService {
       }),
       this.prisma.gasto.findMany({ where: { estado: 'PENDIENTE' } }),
       this.prisma.proyecto.findMany({
-        where: { estado: 'EnEjecucion' as any },
+        where: { estado: { in: ['EnEjecucion', 'Finalizado'] as any } },
         include: {
           facturas: { where: { estado: { not: 'ANULADA' } } },
           gastos: { where: { estado: { not: 'ANULADO' } } },
