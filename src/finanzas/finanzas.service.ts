@@ -2881,6 +2881,18 @@ export class FinanzasService {
     for (const p of proyectos) {
       if (Number(p.costoPresupuestado || 0) === 0 && Number(p.ventaContratada || 0) > 0) {
         const defaultBudget = Number(p.ventaContratada) * 0.60;
+        
+        await this.prisma.historialCambio.create({
+          data: {
+            proyectoId: p.id,
+            campo: 'INYECCION_PRESUPUESTO',
+            valorAnterior: '[MATERIALES] Presupuesto Inicial (60% Autocalculado)',
+            valorNuevo: String(defaultBudget),
+            usuario: 'SISTEMA',
+            area: Area.LogisticaYRecursos
+          }
+        });
+
         await this.prisma.proyecto.update({
           where: { id: p.id },
           data: {
@@ -3196,10 +3208,37 @@ export class FinanzasService {
   }
 
   async getHistorialPresupuesto(proyectoId: string) {
-    const inyecciones = await this.prisma.historialCambio.findMany({
+    let inyecciones = await this.prisma.historialCambio.findMany({
       where: { proyectoId, campo: 'INYECCION_PRESUPUESTO' },
       orderBy: { fecha: 'desc' }
     });
+    
+    if (inyecciones.length === 0) {
+      const proyecto = await this.prisma.proyecto.findUnique({ where: { id: proyectoId } });
+      if (proyecto && proyecto.ventaContratada && Number(proyecto.ventaContratada) > 0) {
+        const defaultBudget = Number(proyecto.ventaContratada) * 0.60;
+        const defaultInyeccion = await this.prisma.historialCambio.create({
+          data: {
+            proyectoId,
+            campo: 'INYECCION_PRESUPUESTO',
+            valorAnterior: '[MATERIALES] Presupuesto Inicial (60% Autocalculado)',
+            valorNuevo: String(defaultBudget),
+            usuario: 'SISTEMA',
+            area: Area.LogisticaYRecursos
+          }
+        });
+        
+        await this.prisma.proyecto.update({
+          where: { id: proyectoId },
+          data: {
+            costoPresupuestado: defaultBudget,
+            margenMeta: Number(proyecto.ventaContratada) - defaultBudget,
+          }
+        });
+        
+        inyecciones = [defaultInyeccion];
+      }
+    }
     
     return inyecciones.map(i => ({
       id: i.id,
