@@ -3505,6 +3505,59 @@ export class FinanzasService {
     const impuestoRenta = (subtotalVentas * porcentajeRenta) / 100;
     const montoFinalSunat = igvPorPagar + impuestoRenta;
 
+    const detalleFacturas = await this.prisma.factura.findMany({
+      where: {
+        fechaEmision: {
+          gte: startDate,
+          lte: endDate,
+        },
+        estado: { not: 'ANULADA' },
+      },
+      select: {
+        id: true,
+        codigo: true,
+        fechaEmision: true,
+        estado: true,
+        montoIgv: true,
+        cliente: {
+          select: {
+            empresa: true,
+          },
+        },
+      },
+      orderBy: {
+        fechaEmision: 'asc',
+      },
+    });
+
+    const detalleGastos = await this.prisma.gasto.findMany({
+      where: {
+        fechaEmision: {
+          gte: startDate,
+          lte: endDate,
+        },
+        tipoComprobante: 'FACTURA',
+        aplicaImpuestos: true,
+        estado: { not: 'ANULADO' },
+      },
+      select: {
+        id: true,
+        codigo: true,
+        concepto: true,
+        fechaEmision: true,
+        estado: true,
+        montoIgv: true,
+        proveedor: {
+          select: {
+            razonSocial: true,
+          },
+        },
+      },
+      orderBy: {
+        fechaEmision: 'asc',
+      },
+    });
+
     return {
       mes,
       anio,
@@ -3521,6 +3574,8 @@ export class FinanzasService {
       impuestoRenta,
       montoFinalSunat,
       creditoFiscalAcumulado: (igvVentas - igvCompras < 0) ? Math.abs(igvVentas - igvCompras) : 0,
+      detalleFacturas,
+      detalleGastos,
     };
   }
 
