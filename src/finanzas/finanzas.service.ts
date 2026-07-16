@@ -2846,7 +2846,7 @@ export class FinanzasService {
   // ============================================
 
   async getProyectosPendientesFinanzas(todas: boolean = false) {
-    return this.prisma.proyecto.findMany({
+    const proyectos = await this.prisma.proyecto.findMany({
       where: todas ? {} : {
         estado: { not: 'Finalizado' },
       },
@@ -2877,6 +2877,22 @@ export class FinanzasService {
       },
       orderBy: { fechaCreacion: 'desc' },
     });
+
+    for (const p of proyectos) {
+      if (Number(p.costoPresupuestado || 0) === 0 && Number(p.ventaContratada || 0) > 0) {
+        const defaultBudget = Number(p.ventaContratada) * 0.60;
+        await this.prisma.proyecto.update({
+          where: { id: p.id },
+          data: {
+            costoPresupuestado: defaultBudget,
+            margenMeta: Number(p.ventaContratada) - defaultBudget,
+          },
+        });
+        p.costoPresupuestado = defaultBudget as any;
+      }
+    }
+
+    return proyectos;
   }
 
   async updateEstadoFinanciero(

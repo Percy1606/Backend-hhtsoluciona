@@ -499,11 +499,13 @@ export class OperacionesService {
         if (!cotizacion) throw new BadRequestException('La cotización asociada no existe.');
 
         // Actualizar el proyecto existente con los montos
+        const defaultBudget = Number(existingActiveProject.costoPresupuestado || 0) === 0 ? Number(cotizacion.monto) * 0.60 : Number(existingActiveProject.costoPresupuestado || 0);
         const updatedProject = await this.prisma.proyecto.update({
           where: { id: existingActiveProject.id },
           data: {
             ventaContratada: Number(cotizacion.monto),
-            margenMeta: Number(cotizacion.monto) - Number(existingActiveProject.costoPresupuestado || 0),
+            costoPresupuestado: defaultBudget,
+            margenMeta: Number(cotizacion.monto) - defaultBudget,
             cotizacionOrigen: { connect: { id: cotizacionId } }
           }
         });
@@ -615,8 +617,8 @@ export class OperacionesService {
           avanceCalculado: 0,
 
           ventaContratada: cotizacion ? Number(cotizacion.monto) : 0,
-          costoPresupuestado: Number(dto.costoPresupuestado || 0),
-          margenMeta: (cotizacion ? Number(cotizacion.monto) : 0) - Number(dto.costoPresupuestado || 0),
+          costoPresupuestado: Number(dto.costoPresupuestado || 0) || (cotizacion ? Number(cotizacion.monto) * 0.60 : 0),
+          margenMeta: (cotizacion ? Number(cotizacion.monto) : 0) - (Number(dto.costoPresupuestado || 0) || (cotizacion ? Number(cotizacion.monto) * 0.60 : 0)),
 
           creadoPor: user?.nombre || 'Admin',
           fechaCreacion: new Date(),
