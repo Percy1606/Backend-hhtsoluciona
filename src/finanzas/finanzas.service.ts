@@ -3453,35 +3453,43 @@ export class FinanzasService {
   // IMPUESTOS Y DECLARACIONES
   // ============================================
   
-  async getImpuestosMensuales(mes: number, anio: number) {
-    const startDate = new Date(anio, mes - 1, 1);
-    const endDate = new Date(anio, mes, 0, 23, 59, 59);
+  async getImpuestosMensuales(mes?: number, anio?: number) {
+    const whereFactura: any = { estado: { not: 'ANULADA' } };
+    const whereGasto: any = {
+      tipoComprobante: 'FACTURA',
+      aplicaImpuestos: true,
+      estado: { not: 'ANULADO' },
+    };
+
+    if (mes && anio) {
+      const startDate = new Date(anio, mes - 1, 1);
+      const endDate = new Date(anio, mes, 0, 23, 59, 59);
+      whereFactura.fechaEmision = { gte: startDate, lte: endDate };
+      whereGasto.fechaEmision = { gte: startDate, lte: endDate };
+    } else if (anio) {
+      const startDate = new Date(anio, 0, 1);
+      const endDate = new Date(anio, 11, 31, 23, 59, 59);
+      whereFactura.fechaEmision = { gte: startDate, lte: endDate };
+      whereGasto.fechaEmision = { gte: startDate, lte: endDate };
+    }
 
     const rawVentas = await this.prisma.factura.findMany({
-      where: {
-        fechaEmision: {
-          gte: startDate,
-          lte: endDate,
-        },
-        estado: { not: 'ANULADA' },
-      },
+      where: whereFactura,
       include: {
         cliente: { select: { empresa: true } },
+      },
+      orderBy: {
+        fechaEmision: 'asc',
       },
     });
 
     const rawCompras = await this.prisma.gasto.findMany({
-      where: {
-        fechaEmision: {
-          gte: startDate,
-          lte: endDate,
-        },
-        tipoComprobante: 'FACTURA',
-        aplicaImpuestos: true,
-        estado: { not: 'ANULADO' },
-      },
+      where: whereGasto,
       include: {
         proveedor: { select: { razonSocial: true } },
+      },
+      orderBy: {
+        fechaEmision: 'asc',
       },
     });
 
@@ -3547,8 +3555,8 @@ export class FinanzasService {
     const montoFinalSunat = igvPorPagar + impuestoRenta;
 
     return {
-      mes,
-      anio,
+      mes: mes || 'all',
+      anio: anio || 'all',
       ventas: {
         subtotal: subtotalVentas,
         igv: igvVentas,

@@ -758,12 +758,9 @@ export class FinanzasController {
   @UseGuards(ModulesGuard)
   @Modules('finanzas')
   getImpuestosMensuales(@Query('mes') mes: string, @Query('anio') anio: string) {
-    if (!mes || !anio) {
-      const now = new Date();
-      mes = (now.getMonth() + 1).toString();
-      anio = now.getFullYear().toString();
-    }
-    return this.finanzasService.getImpuestosMensuales(parseInt(mes), parseInt(anio));
+    const m = (mes === 'all' || !mes) ? undefined : parseInt(mes);
+    const a = (anio === 'all' || !anio) ? undefined : parseInt(anio);
+    return this.finanzasService.getImpuestosMensuales(m, a);
   }
 
   @Post('impuestos/config')
