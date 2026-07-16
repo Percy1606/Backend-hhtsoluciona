@@ -2420,61 +2420,73 @@ export class FinanzasService {
         where: { estado: { not: 'ANULADA' } },
         include: { cliente: true, proyecto: true },
       }),
-      this.prisma.pago.findMany({
-        where: { fechaPago: { gte: startOfMonth, lte: endOfMonth } },
-      }),
+      this.prisma.pago.findMany(),
       this.prisma.gasto.findMany({
         where: { estado: { not: 'ANULADO' } },
       }),
     ]);
 
-    // Estadísticas del mes actual
+    // Estadísticas mensuales del período seleccionado (o por defecto mes actual)
     const totalFacturadoMes = facturas
       .filter((f) => f.fechaEmision >= startOfMonth && f.fechaEmision <= endOfMonth)
       .reduce((acc, f) => acc + Number(f.montoTotal), 0);
     
-    const totalCobradoMes = pagos.reduce((acc, p) => acc + Number(p.monto), 0);
+    const totalCobradoMes = pagos
+      .filter((p) => p.fechaPago >= startOfMonth && p.fechaPago <= endOfMonth)
+      .reduce((acc, p) => acc + Number(p.monto), 0);
     
     const totalGastosPagadosMes = gastos
       .filter((g) => g.estado === 'PAGADO' && g.fechaPago && g.fechaPago >= startOfMonth && g.fechaPago <= endOfMonth)
       .reduce((acc, g) => acc + Number(g.montoTotal), 0);
 
-    // Totales acumulados (para las cards de la UI)
-    const totalFacturado = facturas.reduce((acc, f) => acc + Number(f.montoTotal), 0);
-    const totalCobrado = facturas.reduce((acc, f) => {
-      const sumPagos = (f as any).pagos?.reduce((s: number, p: any) => s + Number(p.monto), 0) || 0;
-      // Nota: Si no incluimos pagos en la consulta principal, usamos aggregate o el saldo pendiente
-      return acc + (Number(f.montoTotal) - Number(f.saldoPendiente));
-    }, 0);
+    const utilidadMes = totalCobradoMes - totalGastosPagadosMes;
 
-    const totalGastosPagados = gastos
+    // Totales acumulados para las cards (filtrados según el selector superior de mes/año)
+    let facturasAcumuladas = facturas;
+    let gastosAcumuladas = gastos;
+    let pagosAcumulados = pagos;
+
+    if (anio !== undefined) {
+      facturasAcumuladas = facturasAcumuladas.filter(f => f.fechaEmision.getFullYear() === anio);
+      gastosAcumuladas = gastosAcumuladas.filter(g => new Date(g.fechaEmision || g.createdAt).getFullYear() === anio);
+      pagosAcumulados = pagosAcumulados.filter(p => p.fechaPago.getFullYear() === anio);
+    }
+    if (mes !== undefined) {
+      facturasAcumuladas = facturasAcumuladas.filter(f => f.fechaEmision.getMonth() + 1 === mes);
+      gastosAcumuladas = gastosAcumuladas.filter(g => new Date(g.fechaEmision || g.createdAt).getMonth() + 1 === mes);
+      pagosAcumulados = pagosAcumulados.filter(p => p.fechaPago.getMonth() + 1 === mes);
+    }
+
+    const totalFacturado = facturasAcumuladas.reduce((acc, f) => acc + Number(f.montoTotal), 0);
+    const totalCobrado = pagosAcumulados.reduce((acc, p) => acc + Number(p.monto), 0);
+    const totalPendiente = facturasAcumuladas.reduce((acc, f) => acc + Number(f.saldoPendiente), 0);
+
+    const totalGastosPagados = gastosAcumuladas
       .filter((g) => g.estado === 'PAGADO')
       .reduce((acc, g) => acc + Number(g.montoTotal), 0);
     
-    const totalGastosPendientes = gastos
+    const totalGastosPendientes = gastosAcumuladas
       .filter((g) => g.estado === 'PENDIENTE')
       .reduce((acc, g) => acc + Number(g.montoTotal), 0);
 
-    const facturasCriticas = facturas.filter(
+    const facturasCriticas = facturasAcumuladas.filter(
       (f) =>
         (f.estado === 'PENDIENTE' || f.estado === 'PAGO_PARCIAL' || f.estado === 'VENCIDA') &&
         new Date(f.fechaVencimiento) < today &&
         Number(f.saldoPendiente) > 0,
     );
 
-    const utilidadMes = totalCobradoMes - totalGastosPagadosMes;
-
     return {
       totalFacturado,
       totalCobrado,
-      totalPendiente: totalFacturado - totalCobrado,
+      totalPendiente,
       totalGastosPagados,
       totalGastosPendientes,
       utilidadMes,
       utilidadNeta: totalCobrado - totalGastosPagados,
       margenNeto: totalCobrado > 0 ? Number((( (totalCobrado - totalGastosPagados) / totalCobrado) * 100).toFixed(1)) : 0,
-      facturasPendientes: facturas.filter((x) => x.estado === 'PENDIENTE').length,
-      facturasParciales: facturas.filter((x) => x.estado === 'PAGO_PARCIAL').length,
+      facturasPendientes: facturasAcumuladas.filter((x) => x.estado === 'PENDIENTE').length,
+      facturasParciales: facturasAcumuladas.filter((x) => x.estado === 'PAGO_PARCIAL').length,
       facturasVencidas: facturasCriticas.length,
       proyeccion90Dias: await this.get90DayProjection(),
       facturasCriticas: facturasCriticas.map((f) => ({
@@ -2492,6 +2504,7 @@ export class FinanzasService {
   }
 
   async getExecutiveDashboard() {
+    const today = new Date();
     const [cajas, facturas, gastos, proyectos] = await Promise.all([
       this.prisma.caja.findMany(),
       this.prisma.factura.findMany({
@@ -2524,10 +2537,14 @@ export class FinanzasService {
     );
     const porPagar = gastos.reduce((acc, x) => acc + Number(x.montoTotal), 0);
 
-    const hoy = new Date();
-    const facturasCriticas = facturas.filter(
-      (f) => new Date(f.fechaVencimiento) < hoy,
-    ).length;
+    const facturasCriticasList = facturas.filter(
+      (f) => new Date(f.fechaVencimiento) < today,
+    );
+    const facturasCriticas = facturasCriticasList.length;
+    const porCobrarVencido = facturasCriticasList.reduce(
+      (acc, x) => acc + Number(x.saldoPendiente),
+      0,
+    );
 
     // Calcular rentabilidad por proyecto para el TOP
     const rentabilidadProyectos = proyectos
@@ -2557,7 +2574,7 @@ export class FinanzasService {
 
     return {
       resumenCaja: { disponible, porMoneda: cajas.map(c => ({ nombre: c.nombre, saldo: c.saldoDisponible, moneda: c.moneda })) },
-      cartera: { porCobrar, porPagar, facturasCriticas },
+      cartera: { porCobrar, porCobrarVencido, porPagar, facturasCriticas },
       proyectos: { topRentabilidad: rentabilidadProyectos },
       proyeccion: await this.get90DayProjection(),
       indicadores: {
