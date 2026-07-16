@@ -2960,6 +2960,10 @@ export class FinanzasService {
     const proyecto = await this.prisma.proyecto.findUnique({ where: { id: proyectoId }, include: { cotizacionOrigen: true } });
     if (!proyecto) throw new NotFoundException('Proyecto no encontrado');
     
+    const total = Number(dto.monto);
+    const subtotal = Math.round((total / 1.18) * 100) / 100;
+    const igv = Math.round((total - subtotal) * 100) / 100;
+
     // Si hay un hito asociado, podríamos marcarlo como facturado o usarlo de referencia.
     // Creamos la factura:
     return this.prisma.factura.create({
@@ -2969,8 +2973,10 @@ export class FinanzasService {
         cotizacionId: proyecto.cotizacionOrigen?.id,
         codigo: `FAC-${Date.now().toString().slice(-6)}`,
         observaciones: dto.descripcion,
-        montoTotal: dto.monto,
-        saldoPendiente: dto.monto,
+        montoTotal: total,
+        montoSubtotal: subtotal,
+        montoIgv: igv,
+        saldoPendiente: total,
         fechaVencimiento: new Date(dto.fechaVencimiento),
         estado: 'PENDIENTE',
         hitoPagoId: dto.hitoId,
@@ -3451,27 +3457,20 @@ export class FinanzasService {
     const startDate = new Date(anio, mes - 1, 1);
     const endDate = new Date(anio, mes, 0, 23, 59, 59);
 
-    const ventas = await this.prisma.factura.aggregate({
-      _sum: {
-        montoSubtotal: true,
-        montoIgv: true,
-        montoTotal: true,
-      },
+    const rawVentas = await this.prisma.factura.findMany({
       where: {
         fechaEmision: {
           gte: startDate,
           lte: endDate,
         },
         estado: { not: 'ANULADA' },
-      }
+      },
+      include: {
+        cliente: { select: { empresa: true } },
+      },
     });
 
-    const compras = await this.prisma.gasto.aggregate({
-      _sum: {
-        montoSubtotal: true,
-        montoIgv: true,
-        montoTotal: true,
-      },
+    const rawCompras = await this.prisma.gasto.findMany({
       where: {
         fechaEmision: {
           gte: startDate,
@@ -3480,14 +3479,56 @@ export class FinanzasService {
         tipoComprobante: 'FACTURA',
         aplicaImpuestos: true,
         estado: { not: 'ANULADO' },
-      }
+      },
+      include: {
+        proveedor: { select: { razonSocial: true } },
+      },
     });
 
-    const subtotalVentas = Number(ventas._sum.montoSubtotal) || 0;
-    const igvVentas = Number(ventas._sum.montoIgv) || 0;
-    
-    const subtotalCompras = Number(compras._sum.montoSubtotal) || 0;
-    const igvCompras = Number(compras._sum.montoIgv) || 0;
+    let subtotalVentas = 0;
+    let igvVentas = 0;
+    const detalleFacturas = rawVentas.map(f => {
+      const total = Number(f.montoTotal || 0);
+      let sub = Number(f.montoSubtotal || 0);
+      let igv = Number(f.montoIgv || 0);
+      if (igv === 0 && total > 0) {
+        sub = Math.round((total / 1.18) * 100) / 100;
+        igv = Math.round((total - sub) * 100) / 100;
+      }
+      subtotalVentas += sub;
+      igvVentas += igv;
+      return {
+        id: f.id,
+        codigo: f.codigo,
+        fechaEmision: f.fechaEmision,
+        estado: f.estado,
+        montoIgv: igv,
+        cliente: f.cliente,
+      };
+    });
+
+    let subtotalCompras = 0;
+    let igvCompras = 0;
+    const detalleGastos = rawCompras.map(g => {
+      const total = Number(g.montoTotal || 0);
+      let sub = Number(g.montoSubtotal || 0);
+      let igv = Number(g.montoIgv || 0);
+      if (igv === 0 && total > 0) {
+        sub = Math.round((total / 1.18) * 100) / 100;
+        igv = Math.round((total - sub) * 100) / 100;
+      }
+      subtotalCompras += sub;
+      igvCompras += igv;
+      return {
+        id: g.id,
+        codigo: g.codigo,
+        concepto: g.concepto,
+        fechaEmision: g.fechaEmision,
+        estado: g.estado,
+        montoIgv: igv,
+        proveedor: g.proveedor,
+      };
+    });
 
     const igvPorPagar = Math.max(0, igvVentas - igvCompras);
 
@@ -3504,59 +3545,6 @@ export class FinanzasService {
 
     const impuestoRenta = (subtotalVentas * porcentajeRenta) / 100;
     const montoFinalSunat = igvPorPagar + impuestoRenta;
-
-    const detalleFacturas = await this.prisma.factura.findMany({
-      where: {
-        fechaEmision: {
-          gte: startDate,
-          lte: endDate,
-        },
-        estado: { not: 'ANULADA' },
-      },
-      select: {
-        id: true,
-        codigo: true,
-        fechaEmision: true,
-        estado: true,
-        montoIgv: true,
-        cliente: {
-          select: {
-            empresa: true,
-          },
-        },
-      },
-      orderBy: {
-        fechaEmision: 'asc',
-      },
-    });
-
-    const detalleGastos = await this.prisma.gasto.findMany({
-      where: {
-        fechaEmision: {
-          gte: startDate,
-          lte: endDate,
-        },
-        tipoComprobante: 'FACTURA',
-        aplicaImpuestos: true,
-        estado: { not: 'ANULADO' },
-      },
-      select: {
-        id: true,
-        codigo: true,
-        concepto: true,
-        fechaEmision: true,
-        estado: true,
-        montoIgv: true,
-        proveedor: {
-          select: {
-            razonSocial: true,
-          },
-        },
-      },
-      orderBy: {
-        fechaEmision: 'asc',
-      },
-    });
 
     return {
       mes,
