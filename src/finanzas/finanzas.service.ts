@@ -2847,9 +2847,7 @@ export class FinanzasService {
 
   async getProyectosPendientesFinanzas(todas: boolean = false) {
     const proyectos = await this.prisma.proyecto.findMany({
-      where: todas ? {} : {
-        estado: { not: 'Finalizado' },
-      },
+      where: {},
       select: {
         id: true,
         codigo: true,
