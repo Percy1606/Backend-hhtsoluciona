@@ -261,6 +261,22 @@ export class FinanzasService {
     }
   }
 
+  private async handleLogisticsApprovalAutomation(
+    tx: any,
+    gasto: any,
+  ) {
+    if (!gasto.ordenCompraId) return;
+    const orden = await tx.ordenCompra.findUnique({
+      where: { id: gasto.ordenCompraId },
+    });
+    if (orden && orden.estado === 'PENDIENTE') {
+      await tx.ordenCompra.update({
+        where: { id: gasto.ordenCompraId },
+        data: { estado: 'APROBADO' },
+      });
+    }
+  }
+
   // ============================================
   // UTILIDAD: Sincronización Directa de Ingreso (Desde otros módulos)
   // ============================================
@@ -746,6 +762,22 @@ export class FinanzasService {
 
     const dbCajaAccess = await this.checkCajaAccess(targetCajaId, usuarioId);
 
+    // Validar que el pago no supere la deuda total de las facturas vigentes del cliente para evitar saldos negativos
+    const saldoPrincipal = Number(facturaPrincipal.saldoPendiente);
+    const otrasFacturasPendientes = await this.prisma.factura.findMany({
+      where: {
+        clienteId: facturaPrincipal.clienteId,
+        id: { not: facturaPrincipal.id },
+        estado: { in: ['PENDIENTE', 'PAGO_PARCIAL', 'VENCIDA'] as any },
+      },
+    });
+    const totalAdeudadoCliente = saldoPrincipal + otrasFacturasPendientes.reduce((sum, f) => sum + Number(f.saldoPendiente), 0);
+    if (Number(dto.monto) > totalAdeudadoCliente) {
+      throw new BadRequestException(
+        `El monto del pago (${Number(dto.monto).toFixed(2)}) supera la deuda total de facturas vigentes del cliente (${totalAdeudadoCliente.toFixed(2)}).`
+      );
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const dbCaja = await tx.caja.findUnique({ where: { id: targetCajaId } });
       if (!dbCaja) throw new NotFoundException('Caja no encontrada');
@@ -983,6 +1015,13 @@ export class FinanzasService {
       });
 
       if (
+        (currentGasto.estado === 'PENDIENTE' || currentGasto.estado === 'SOLICITADO') && 
+        data.estado === 'APROBADO'
+      ) {
+        await this.handleLogisticsApprovalAutomation(tx, updatedGasto);
+      }
+
+      if (
         (currentGasto.estado === 'PENDIENTE' || currentGasto.estado === 'SOLICITADO' || currentGasto.estado === 'APROBADO') && 
         data.estado === 'PAGADO'
       ) {
@@ -1071,6 +1110,7 @@ export class FinanzasService {
           updated.cajaId || undefined,
           tx,
         );
+        await this.handleLogisticsApprovalAutomation(tx, updated);
       }
 
       return updated;
@@ -3157,6 +3197,49 @@ export class FinanzasService {
 
     await this.prisma.historialCambio.delete({
       where: { id: inyeccionId }
+    });
+
+    const inyecciones = await this.prisma.historialCambio.findMany({
+      where: { proyectoId, campo: 'INYECCION_PRESUPUESTO' }
+    });
+    
+    const totalPresupuesto = inyecciones.reduce((sum, item) => sum + Number(item.valorNuevo), 0);
+
+    await this.prisma.proyecto.update({
+      where: { id: proyectoId },
+      data: { costoPresupuestado: totalPresupuesto },
+    });
+
+    return { success: true, totalPresupuesto };
+  }
+
+  async actualizarInyeccionPresupuesto(proyectoId: string, inyeccionId: string, monto: number, motivo: string, usuario: string) {
+    const proyecto = await this.prisma.proyecto.findUnique({ where: { id: proyectoId } });
+    if (!proyecto) throw new NotFoundException('Proyecto no encontrado');
+
+    const inyeccion = await this.prisma.historialCambio.findFirst({
+      where: { id: inyeccionId, proyectoId, campo: 'INYECCION_PRESUPUESTO' }
+    });
+    if (!inyeccion) throw new NotFoundException('Registro de inyección no encontrado');
+
+    const inyeccionesExistentes = await this.prisma.historialCambio.findMany({
+      where: { proyectoId, campo: 'INYECCION_PRESUPUESTO', id: { not: inyeccionId } }
+    });
+    
+    const presupuestoSinActual = inyeccionesExistentes.reduce((sum, item) => sum + Number(item.valorNuevo), 0);
+    const limiteGasto = Number(proyecto.ventaContratada) * 0.60;
+    
+    if (presupuestoSinActual + monto > limiteGasto) {
+      throw new BadRequestException(`El monto supera el límite del 60% del valor de venta del proyecto.`);
+    }
+
+    await this.prisma.historialCambio.update({
+      where: { id: inyeccionId },
+      data: {
+        valorAnterior: motivo,
+        valorNuevo: String(monto),
+        usuario: usuario,
+      }
     });
 
     const inyecciones = await this.prisma.historialCambio.findMany({

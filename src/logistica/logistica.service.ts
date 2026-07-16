@@ -564,19 +564,47 @@ export class LogisticaService {
         throw new BadRequestException('Stock insuficiente (concurrencia)');
       }
 
+      // Calcular Costo Promedio Ponderado para el Costo de Salida
+      const entradas = await tx.movimientoAlmacen.findMany({
+        where: {
+          insumoId: data.insumoId,
+          tipo: 'ENTRADA',
+        },
+        select: {
+          cantidad: true,
+          costoUnitarioHistorico: true,
+        },
+      });
+
+      let costoUnitarioSalida = Number(currentInsumo.precioReferencial);
+
+      if (entradas.length > 0) {
+        let totalCantidadEntradas = 0;
+        let totalValorEntradas = 0;
+        for (const entrada of entradas) {
+          const cant = Number(entrada.cantidad);
+          const costo = Number(entrada.costoUnitarioHistorico || 0);
+          totalCantidadEntradas += cant;
+          totalValorEntradas += (cant * costo);
+        }
+        if (totalCantidadEntradas > 0) {
+          costoUnitarioSalida = Math.round((totalValorEntradas / totalCantidadEntradas) * 100) / 100;
+        }
+      }
+
       // 2. Restar stock
       await tx.insumo.update({
         where: { id: data.insumoId },
         data: { stockActual: { decrement: data.cantidad } },
       });
 
-      // 2. Crear movimiento de salida con costo histórico (ERROR 3)
+      // 2. Crear movimiento de salida con costo promedio ponderado
       const movimiento = await tx.movimientoAlmacen.create({
         data: {
           insumoId: data.insumoId,
           tipo: TipoMovimiento.SALIDA,
           cantidad: data.cantidad,
-          costoUnitarioHistorico: Number(currentInsumo.precioReferencial), // Guardamos el precio actual "en piedra"
+          costoUnitarioHistorico: costoUnitarioSalida,
           proyectoId: data.proyectoId,
           motivo: data.motivo || 'Despacho a Obra',
           usuarioId: data.usuarioId,

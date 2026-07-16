@@ -704,6 +704,20 @@ export class FinanzasController {
     return this.finanzasService.eliminarInyeccionPresupuesto(id, inyeccionId);
   }
 
+  @Patch('bandeja-proyectos/:id/inyecciones-presupuesto/:inyeccionId')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  actualizarInyeccionPresupuesto(
+    @Param('id') id: string,
+    @Param('inyeccionId') inyeccionId: string,
+    @Body('monto') monto: number,
+    @Body('motivo') motivo: string,
+    @Req() req: any,
+  ) {
+    const usuario = req.user?.nombre || req.user?.email || 'Sistema';
+    return this.finanzasService.actualizarInyeccionPresupuesto(id, inyeccionId, monto, motivo, usuario);
+  }
+
   // ============================================
   // GASTOS FIJOS / RECURRENTES
   // ============================================
