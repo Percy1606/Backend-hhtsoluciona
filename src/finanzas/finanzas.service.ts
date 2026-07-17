@@ -901,9 +901,20 @@ export class FinanzasService {
     let targetCajaId = dto.cajaId;
     
     if (!targetCajaId || targetCajaId === 'none' || targetCajaId === '') {
-      const preferredCaja = await this.prisma.caja.findFirst({
-        where: { OR: [{ nombre: { contains: 'Principal' } }, { moneda: 'PEN' }] }
-      });
+      const isGeneralExpense = !dto.proyectoId || dto.proyectoId === '' || dto.proyectoId === 'none';
+      let preferredCaja = null;
+      
+      if (isGeneralExpense) {
+        preferredCaja = await this.prisma.caja.findFirst({
+          where: { nombre: { contains: 'General' } }
+        });
+      }
+      
+      if (!preferredCaja) {
+        preferredCaja = await this.prisma.caja.findFirst({
+          where: { OR: [{ nombre: { contains: 'Principal' } }, { moneda: 'PEN' }] }
+        });
+      }
       targetCajaId = preferredCaja?.id;
     }
 
@@ -953,7 +964,7 @@ export class FinanzasService {
       if (gasto.estado === 'APROBADO' || gasto.estado === 'PAGADO') {
         await this.blockFunds(
           Number(gasto.montoTotal),
-          `Reserva: ${gasto.concepto}`,
+          gasto.concepto,
           'GASTO',
           gasto.id,
           usuarioId,
@@ -1110,7 +1121,7 @@ export class FinanzasService {
       if (needsBlocking) {
         await this.blockFunds(
           Number(updated.montoTotal),
-          `Reserva: ${updated.concepto}`,
+          updated.concepto,
           'GASTO',
           updated.id,
           usuarioId,
@@ -1462,6 +1473,7 @@ export class FinanzasService {
     ) {
       const nuevoReal = Number(saldoReal);
       const diferencia = nuevoReal - Number(current.saldoReal);
+      const tipoTransaccion = diferencia > 0 ? 'INGRESO' : 'EGRESO';
 
       updateData.saldoReal = nuevoReal;
       updateData.saldoDisponible =
@@ -1470,7 +1482,7 @@ export class FinanzasService {
       await this.prisma.transaccionCaja.create({
         data: {
           cajaId: id,
-          tipo: 'AJUSTE' as any,
+          tipo: tipoTransaccion,
           monto: Math.abs(diferencia),
           concepto: `Ajuste manual: ${motivoAjuste || 'Sin motivo'}`,
           usuarioId,
