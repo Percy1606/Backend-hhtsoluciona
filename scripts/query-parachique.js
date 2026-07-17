@@ -1,5 +1,13 @@
 const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const { PrismaMariaDb } = require('@prisma/adapter-mariadb');
+require('dotenv').config({ path: require('path').resolve(process.cwd(), '.env') });
+
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  throw new Error("DATABASE_URL is not defined");
+}
+const adapter = new PrismaMariaDb(databaseUrl);
+const prisma = new PrismaClient({ adapter });
 
 async function run() {
   try {
@@ -7,7 +15,7 @@ async function run() {
       where: { empresa: { contains: 'HIELO' } },
       include: {
         proyectos: {
-          select: { id: true, codigo: true, nombre: true, fechaCreacion: true, ventaContratada: true }
+          select: { id: true, codigo: true, nombre: true, fechaCreacion: true, ventaContratada: true, estado: true }
         },
         cotizaciones: {
           select: { id: true, codigo: true, fechaCreacion: true, monto: true, estado: true }
