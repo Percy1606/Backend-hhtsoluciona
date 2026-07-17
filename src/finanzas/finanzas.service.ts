@@ -2382,33 +2382,33 @@ export class FinanzasService {
     const osMontoPEN = ordenesServicio.filter(os => os.cotizacion?.moneda === 'PEN').reduce((acc, os) => acc + Number(os.cotizacion?.monto || 0), 0);
     const osMontoUSD = ordenesServicio.filter(os => os.cotizacion?.moneda === 'USD').reduce((acc, os) => acc + Number(os.cotizacion?.monto || 0), 0);
 
+    const facturaPeriodoWhere: any = { estado: { not: 'ANULADA' } };
+    const gastoPeriodoWhere: any = { estado: { notIn: ['SOLICITADO', 'ANULADO'] as any } };
+    const pagoInflowWhere: any = { facturaId: { not: null } };
+    const pagoOutflowWhere: any = { gastoId: { not: null } };
+
+    if (filterStartDate && filterEndDate) {
+      facturaPeriodoWhere.fechaEmision = { gte: filterStartDate, lte: filterEndDate };
+      gastoPeriodoWhere.fechaEmision = { gte: filterStartDate, lte: filterEndDate };
+      pagoInflowWhere.fechaPago = { gte: filterStartDate, lte: filterEndDate };
+      pagoOutflowWhere.fechaPago = { gte: filterStartDate, lte: filterEndDate };
+    }
+
     const [facturasPeriodo, gastosPeriodo, pagosInflows, pagosOutflows] = await Promise.all([
       this.prisma.factura.findMany({
-        where: {
-          fechaEmision: { gte: utilityStart, lte: utilityEnd },
-          estado: { not: 'ANULADA' }
-        },
+        where: facturaPeriodoWhere,
         select: { montoTotal: true }
       }),
       this.prisma.gasto.findMany({
-        where: {
-          fechaEmision: { gte: utilityStart, lte: utilityEnd },
-          estado: { notIn: ['SOLICITADO', 'ANULADO'] as any }
-        },
+        where: gastoPeriodoWhere,
         select: { montoTotal: true }
       }),
       this.prisma.pago.aggregate({
-        where: {
-          fechaPago: { gte: utilityStart, lte: utilityEnd },
-          facturaId: { not: null }
-        },
+        where: pagoInflowWhere,
         _sum: { monto: true }
       }),
       this.prisma.pago.aggregate({
-        where: {
-          fechaPago: { gte: utilityStart, lte: utilityEnd },
-          gastoId: { not: null }
-        },
+        where: pagoOutflowWhere,
         _sum: { monto: true }
       })
     ]);
