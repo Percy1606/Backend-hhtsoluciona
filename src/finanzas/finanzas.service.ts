@@ -2375,17 +2375,41 @@ export class FinanzasService {
     const osMontoPEN = ordenesServicio.filter(os => os.cotizacion?.moneda === 'PEN').reduce((acc, os) => acc + Number(os.cotizacion?.monto || 0), 0);
     const osMontoUSD = ordenesServicio.filter(os => os.cotizacion?.moneda === 'USD').reduce((acc, os) => acc + Number(os.cotizacion?.monto || 0), 0);
 
-    const [pagosMes, gastosPagadosMes] = await Promise.all([
+    const [facturasPeriodo, gastosPeriodo, pagosInflows, pagosOutflows] = await Promise.all([
+      this.prisma.factura.findMany({
+        where: {
+          fechaEmision: { gte: utilityStart, lte: utilityEnd },
+          estado: { not: 'ANULADA' }
+        },
+        select: { montoTotal: true }
+      }),
+      this.prisma.gasto.findMany({
+        where: {
+          fechaEmision: { gte: utilityStart, lte: utilityEnd },
+          estado: { notIn: ['ANULADO', 'RECHAZADO'] as any }
+        },
+        select: { montoTotal: true }
+      }),
       this.prisma.pago.aggregate({
-        where: { fechaPago: { gte: utilityStart, lte: utilityEnd } },
+        where: {
+          fechaPago: { gte: utilityStart, lte: utilityEnd },
+          facturaId: { not: null }
+        },
         _sum: { monto: true }
       }),
-      this.prisma.gasto.aggregate({
-        where: { estado: 'PAGADO' as any, fechaPago: { gte: utilityStart, lte: utilityEnd } },
-        _sum: { montoTotal: true }
+      this.prisma.pago.aggregate({
+        where: {
+          fechaPago: { gte: utilityStart, lte: utilityEnd },
+          gastoId: { not: null }
+        },
+        _sum: { monto: true }
       })
     ]);
-    const utilidadAcumuladaMes = Number(pagosMes._sum.monto || 0) - Number(gastosPagadosMes._sum.montoTotal || 0);
+
+    const totalFacturadoPeriodo = facturasPeriodo.reduce((acc, f) => acc + Number(f.montoTotal), 0);
+    const totalGastosPeriodo = gastosPeriodo.reduce((acc, g) => acc + Number(g.montoTotal), 0);
+    const utilidadAcumuladaMes = totalFacturadoPeriodo - totalGastosPeriodo; // Utilidad Devengada (Facturación)
+    const utilidadRealMes = Number(pagosInflows._sum.monto || 0) - Number(pagosOutflows._sum.monto || 0); // Utilidad Real (Caja/Efectivo)
 
     const proyeccion = await this.get90DayProjection();
     const flujoProyectado90 = proyeccion.find(p => p.dias === 90)?.saldoProyectado || 0;
@@ -2403,6 +2427,7 @@ export class FinanzasService {
         montoUSD: osMontoUSD
       },
       utilidadAcumuladaMes,
+      utilidadRealMes,
       flujoProyectado90
     };
   }
