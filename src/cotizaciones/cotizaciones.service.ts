@@ -370,45 +370,79 @@ export class CotizacionesService {
         return;
       }
 
-      const proyectoId = uuidv4();
-      const projectCode = await this.generateProyectoCodigo();
+      // 1. Buscar si existe un proyecto de preventa activo para este cliente (ventaContratada === 0)
+      const existingPreventa = await this.prisma.proyecto.findFirst({
+        where: {
+          clientId: cotizacion.clientId,
+          estado: { not: 'Finalizado' },
+          ventaContratada: 0,
+        },
+      });
+
       const osCode = await this.generateOsCodigo();
       const hoy = new Date();
       const en30Dias = new Date(hoy);
       en30Dias.setDate(en30Dias.getDate() + 30);
 
-      await this.prisma.$transaction(async (tx) => {
-        // 1. Crear Proyecto
-        const proyecto = await tx.proyecto.create({
-          data: {
-            id: proyectoId,
-            codigo: projectCode,
-            nombre: String(cotizacion.referencia || cotizacion.codigo).toUpperCase(),
-            descripcion: cotizacion.objetivo || '',
-            estado: 'Planificacion',
-            semaforo: 'Verde',
-            prioridad: 'Media',
-            area: 'OperacionesDeCampo',
-            fechaInicio: hoy,
-            fechaFinEstimada: en30Dias,
-            responsablePrincipalId: responsablePorDefecto.id,
-            responsablesAdicionales: [],
-            ventaContratada: Number(cotizacion.monto),
-            costoPresupuestado: Number(cotizacion.monto) * 0.60,
-            margenMeta: Number(cotizacion.monto) * 0.40,
-            avance: 0,
-            avanceCalculado: 0,
-            clientId: cotizacion.clientId,
-            // Nuevos campos Fase 1
-            estadoFinanciero: 'SinPago',
-            autorizaCompras: false,
-            estadoLogistica: 'PendienteRevision',
-            creadoPor: user?.nombre || 'SISTEMA',
-            cotizacionOrigen: { connect: { id: cotizacion.id } },
-          },
-        });
+      let proyectoId: string;
+      let projectCode: string;
 
-        // Vincular los documentos de la cotización al nuevo proyecto (si existen)
+      if (existingPreventa) {
+        proyectoId = existingPreventa.id;
+        projectCode = existingPreventa.codigo;
+        console.log(`[AutoGen] Se detectó proyecto de preventa activo: ${projectCode}. Se convertirá a oficial.`);
+      } else {
+        proyectoId = uuidv4();
+        projectCode = await this.generateProyectoCodigo();
+      }
+
+      await this.prisma.$transaction(async (tx) => {
+        let proyecto;
+        if (existingPreventa) {
+          // Actualizar el proyecto de preventa existente para volverlo oficial
+          proyecto = await tx.proyecto.update({
+            where: { id: proyectoId },
+            data: {
+              nombre: String(cotizacion.referencia || cotizacion.codigo).toUpperCase(),
+              descripcion: cotizacion.objetivo || '',
+              ventaContratada: Number(cotizacion.monto),
+              costoPresupuestado: Number(cotizacion.monto) * 0.60,
+              margenMeta: Number(cotizacion.monto) * 0.40,
+              cotizacionOrigen: { connect: { id: cotizacion.id } },
+            },
+          });
+        } else {
+          // Crear un proyecto nuevo desde cero
+          proyecto = await tx.proyecto.create({
+            data: {
+              id: proyectoId,
+              codigo: projectCode,
+              nombre: String(cotizacion.referencia || cotizacion.codigo).toUpperCase(),
+              descripcion: cotizacion.objetivo || '',
+              estado: 'Planificacion',
+              semaforo: 'Verde',
+              prioridad: 'Media',
+              area: 'OperacionesDeCampo',
+              fechaInicio: hoy,
+              fechaFinEstimada: en30Dias,
+              responsablePrincipalId: responsablePorDefecto.id,
+              responsablesAdicionales: [],
+              ventaContratada: Number(cotizacion.monto),
+              costoPresupuestado: Number(cotizacion.monto) * 0.60,
+              margenMeta: Number(cotizacion.monto) * 0.40,
+              avance: 0,
+              avanceCalculado: 0,
+              clientId: cotizacion.clientId,
+              estadoFinanciero: 'SinPago',
+              autorizaCompras: false,
+              estadoLogistica: 'PendienteRevision',
+              creadoPor: user?.nombre || 'SISTEMA',
+              cotizacionOrigen: { connect: { id: cotizacion.id } },
+            },
+          });
+        }
+
+        // Vincular los documentos de la cotización al proyecto (si existen)
         await tx.documento.updateMany({
           where: { cotizacionId: cotizacion.id },
           data: { proyectoId: proyecto.id },
