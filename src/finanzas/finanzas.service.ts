@@ -912,7 +912,14 @@ export class FinanzasService {
     }
 
     const monto = Number(dto.montoTotal);
-    const nivelAprobacion: NivelAprobacion = 'PENDIENTE_FINANZAS';
+    const isGeneralExpense = !dto.proyectoId || dto.proyectoId === '' || dto.proyectoId === 'none';
+    const estadoInicial = dto.estado || 'PENDIENTE';
+    const estado = (isGeneralExpense && (estadoInicial === 'PENDIENTE' || estadoInicial === 'SOLICITADO'))
+      ? 'APROBADO'
+      : estadoInicial;
+    const nivelAprobacion: NivelAprobacion = (estado === 'APROBADO' || estado === 'PAGADO')
+      ? 'APROBADO'
+      : 'PENDIENTE_FINANZAS';
 
     const data: any = {
       ...dto,
@@ -928,7 +935,7 @@ export class FinanzasService {
         : null,
       prioridad: dto.prioridad || 'MEDIA',
       saldoPendiente: monto,
-      estado: 'PENDIENTE',
+      estado,
     };
 
     if (data.proveedorId === '') data.proveedorId = null;
@@ -2428,6 +2435,10 @@ export class FinanzasService {
       },
       utilidadAcumuladaMes,
       utilidadRealMes,
+      totalFacturadoPeriodo,
+      totalGastosPeriodo,
+      totalInflowsPeriodo: Number(pagosInflows._sum.monto || 0),
+      totalOutflowsPeriodo: Number(pagosOutflows._sum.monto || 0),
       flujoProyectado90
     };
   }
