@@ -14,15 +14,9 @@ async function run() {
     const clientes = await prisma.cliente.findMany({
       where: { empresa: { contains: 'HIELO' } },
       include: {
-        proyectos: {
-          select: { id: true, codigo: true, nombre: true, fechaCreacion: true, ventaContratada: true, estado: true }
-        },
-        cotizaciones: {
-          select: { id: true, codigo: true, fechaCreacion: true, monto: true, estado: true }
-        },
-        facturas: {
-          select: { id: true, numero: true, fechaEmision: true, total: true, estado: true }
-        }
+        proyectos: true,
+        cotizaciones: true,
+        facturas: true
       }
     });
     console.log("RESULTADO:", JSON.stringify(clientes, null, 2));
