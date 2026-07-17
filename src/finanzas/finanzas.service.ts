@@ -2386,7 +2386,7 @@ export class FinanzasService {
       this.prisma.gasto.findMany({
         where: {
           fechaEmision: { gte: utilityStart, lte: utilityEnd },
-          estado: { not: 'ANULADO' }
+          estado: { notIn: ['SOLICITADO', 'ANULADO'] as any }
         },
         select: { montoTotal: true }
       }),
