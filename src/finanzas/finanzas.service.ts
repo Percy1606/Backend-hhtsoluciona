@@ -3516,13 +3516,13 @@ export class FinanzasService {
     };
 
     if (mes && anio) {
-      const startDate = new Date(anio, mes - 1, 1);
-      const endDate = new Date(anio, mes, 0, 23, 59, 59);
+      const startDate = new Date(Date.UTC(anio, mes - 1, 1, 0, 0, 0));
+      const endDate = new Date(Date.UTC(anio, mes, 0, 23, 59, 59, 999));
       whereFactura.fechaEmision = { gte: startDate, lte: endDate };
       whereGasto.fechaEmision = { gte: startDate, lte: endDate };
     } else if (anio) {
-      const startDate = new Date(anio, 0, 1);
-      const endDate = new Date(anio, 11, 31, 23, 59, 59);
+      const startDate = new Date(Date.UTC(anio, 0, 1, 0, 0, 0));
+      const endDate = new Date(Date.UTC(anio, 11, 31, 23, 59, 59, 999));
       whereFactura.fechaEmision = { gte: startDate, lte: endDate };
       whereGasto.fechaEmision = { gte: startDate, lte: endDate };
     }
