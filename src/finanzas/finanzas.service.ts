@@ -28,6 +28,14 @@ import {
   Area,
 } from '@prisma/client';
 import { deletePhysicalFiles } from '../common/utils/file-utils';
+import {
+  roundMoney,
+  addMoney,
+  subMoney,
+  mulMoney,
+  divMoney,
+  sumMoneyBy,
+} from '../common/utils/money-utils';
 
 @Injectable()
 export class FinanzasService {
@@ -39,17 +47,17 @@ export class FinanzasService {
   private async checkCajaAccess(
     cajaId: string,
     usuarioId: string,
-    actionLabel = 'operar',
+    actionLabel: string = 'operar',
   ) {
-    const dbCaja = await this.prisma.caja.findUnique({
-      where: { id: cajaId },
-    });
-    if (dbCaja?.esProtegida) {
+    const caja = await this.prisma.caja.findUnique({ where: { id: cajaId } });
+    if (!caja) throw new NotFoundException('Caja no encontrada');
+
+    if (caja.esProtegida) {
       throw new BadRequestException(
-        `ESTA CAJA ESTÁ BLOQUEADA (Bóveda Blindada). No se permite ${actionLabel} hasta que sea desbloqueada por Gerencia General.`,
+        `La cuenta "${caja.nombre}" es una BÓVEDA PROTEGIDA (Reserva Estratégica). No tienes autorización para ${actionLabel} en esta cuenta directamente.`,
       );
     }
-    return dbCaja;
+    return caja;
   }
 
   private async triggerIncomeSync(
@@ -101,12 +109,12 @@ export class FinanzasService {
     });
 
     // 2. Aumentar Saldo
-    const nuevoReal = Number(dbCaja.saldoReal) + monto;
+    const nuevoReal = addMoney(dbCaja.saldoReal, monto);
     await tx.caja.update({
       where: { id: targetCajaId },
       data: {
         saldoReal: nuevoReal,
-        saldoDisponible: nuevoReal - Number(dbCaja.saldoComprometido),
+        saldoDisponible: subMoney(nuevoReal, dbCaja.saldoComprometido),
       },
     });
 
@@ -151,10 +159,10 @@ export class FinanzasService {
     const cajaOrigen = await tx.caja.findUnique({ where: { id: cajaOrigenId } });
     if (!cajaOrigen || Number(cajaOrigen.porcentajeProvision) <= 0) return;
 
-    const montoAhorro =
-      Math.round(
-        montoIngresado * (Number(cajaOrigen.porcentajeProvision) / 100) * 100,
-      ) / 100;
+    const montoAhorro = mulMoney(
+      montoIngresado,
+      Number(cajaOrigen.porcentajeProvision) / 100,
+    );
     if (montoAhorro <= 0) return;
 
     // Buscar la caja de OBLIGACIONES principal
@@ -177,23 +185,22 @@ export class FinanzasService {
 
     // Ejecutar transferencia interna
     // 1. Descontar de Origen
-    const nuevoRealOrigen = Number(cajaOrigen.saldoReal) - montoAhorro;
+    const nuevoRealOrigen = subMoney(cajaOrigen.saldoReal, montoAhorro);
     await tx.caja.update({
       where: { id: cajaOrigen.id },
       data: {
         saldoReal: nuevoRealOrigen,
-        saldoDisponible: nuevoRealOrigen - Number(cajaOrigen.saldoComprometido),
+        saldoDisponible: subMoney(nuevoRealOrigen, cajaOrigen.saldoComprometido),
       },
     });
 
     // 2. Aumentar en Destino
-    const nuevoRealDestino = Number(cajaDestino.saldoReal) + montoAhorro;
+    const nuevoRealDestino = addMoney(cajaDestino.saldoReal, montoAhorro);
     await tx.caja.update({
       where: { id: cajaDestino.id },
       data: {
         saldoReal: nuevoRealDestino,
-        saldoDisponible:
-          nuevoRealDestino - Number(cajaDestino.saldoComprometido),
+        saldoDisponible: subMoney(nuevoRealDestino, cajaDestino.saldoComprometido),
       },
     });
 
@@ -741,6 +748,8 @@ export class FinanzasService {
 
       return updatedFactura;
     });
+
+    return result;
   }
 
   // ============================================
@@ -748,41 +757,48 @@ export class FinanzasService {
   // ============================================
 
   async registerPago(dto: CreatePagoDto, usuarioId: string) {
-    const facturaPrincipal = await this.prisma.factura.findUnique({
-      where: { id: dto.facturaId },
-    });
-    if (!facturaPrincipal) throw new NotFoundException('Factura no encontrada');
-    if (facturaPrincipal.estado === 'ANULADA') {
-      throw new BadRequestException('No se puede registrar pago en una factura ANULADA');
+    if (!dto.monto || Number(dto.monto) <= 0 || !isFinite(Number(dto.monto))) {
+      throw new BadRequestException('El monto del pago debe ser mayor a cero.');
     }
 
     const targetCajaId = dto.cajaId || (await this.prisma.caja.findFirst())?.id;
     if (!targetCajaId)
       throw new BadRequestException('No hay cajas configuradas');
 
-    const dbCajaAccess = await this.checkCajaAccess(targetCajaId, usuarioId);
-
-    // Validar que el pago no supere la deuda total de las facturas vigentes del cliente para evitar saldos negativos
-    const saldoPrincipal = Number(facturaPrincipal.saldoPendiente);
-    const otrasFacturasPendientes = await this.prisma.factura.findMany({
-      where: {
-        clienteId: facturaPrincipal.clienteId,
-        id: { not: facturaPrincipal.id },
-        estado: { in: ['PENDIENTE', 'PAGO_PARCIAL', 'VENCIDA'] as any },
-      },
-    });
-    const totalAdeudadoCliente = saldoPrincipal + otrasFacturasPendientes.reduce((sum, f) => sum + Number(f.saldoPendiente), 0);
-    if (Number(dto.monto) > totalAdeudadoCliente) {
-      throw new BadRequestException(
-        `El monto del pago (${Number(dto.monto).toFixed(2)}) supera la deuda total de facturas vigentes del cliente (${totalAdeudadoCliente.toFixed(2)}).`
-      );
-    }
+    await this.checkCajaAccess(targetCajaId, usuarioId);
 
     return this.prisma.$transaction(async (tx) => {
+      const facturaPrincipal = await tx.factura.findUnique({
+        where: { id: dto.facturaId },
+      });
+      if (!facturaPrincipal) throw new NotFoundException('Factura no encontrada');
+      if (facturaPrincipal.estado === 'ANULADA') {
+        throw new BadRequestException('No se puede registrar pago en una factura ANULADA');
+      }
+
+      // Validar que el pago no supere la deuda total de las facturas vigentes del cliente para evitar saldos negativos
+      const saldoPrincipal = Number(facturaPrincipal.saldoPendiente);
+      const otrasFacturasPendientes = await tx.factura.findMany({
+        where: {
+          clienteId: facturaPrincipal.clienteId,
+          id: { not: facturaPrincipal.id },
+          estado: { in: ['PENDIENTE', 'PAGO_PARCIAL', 'VENCIDA'] as any },
+        },
+      });
+      const totalAdeudadoCliente = addMoney(
+        saldoPrincipal,
+        sumMoneyBy(otrasFacturasPendientes, (f) => f.saldoPendiente),
+      );
+      if (Number(dto.monto) > totalAdeudadoCliente) {
+        throw new BadRequestException(
+          `El monto del pago (${Number(dto.monto).toFixed(2)}) supera la deuda total de facturas vigentes del cliente (${totalAdeudadoCliente.toFixed(2)}).`
+        );
+      }
+
       const dbCaja = await tx.caja.findUnique({ where: { id: targetCajaId } });
       if (!dbCaja) throw new NotFoundException('Caja no encontrada');
 
-      let montoRestante = Math.round(dto.monto * 100) / 100;
+      let montoRestante = roundMoney(dto.monto);
       const pago = await tx.pago.create({
         data: {
           ...dto,
@@ -792,10 +808,8 @@ export class FinanzasService {
         } as any,
       });
 
-      const saldoPrincipal = Number(facturaPrincipal.saldoPendiente);
       const aplicarAPrincipal = Math.min(montoRestante, saldoPrincipal);
-      const nuevoSaldoPrincipal =
-        Math.round((saldoPrincipal - aplicarAPrincipal) * 100) / 100;
+      const nuevoSaldoPrincipal = subMoney(saldoPrincipal, aplicarAPrincipal);
 
       await tx.factura.update({
         where: { id: facturaPrincipal.id },
@@ -810,12 +824,12 @@ export class FinanzasService {
 
       // Registrar ingreso en la caja seleccionada
       if (dbCaja) {
-        const nuevoReal = Number(dbCaja.saldoReal) + Number(pago.monto);
+        const nuevoReal = addMoney(dbCaja.saldoReal, pago.monto);
         await tx.caja.update({
           where: { id: targetCajaId },
           data: {
             saldoReal: nuevoReal,
-            saldoDisponible: nuevoReal - Number(dbCaja.saldoComprometido),
+            saldoDisponible: subMoney(nuevoReal, dbCaja.saldoComprometido),
           },
         });
         await tx.transaccionCaja.create({
@@ -843,8 +857,7 @@ export class FinanzasService {
         );
       }
 
-      montoRestante =
-        Math.round((montoRestante - aplicarAPrincipal) * 100) / 100;
+      montoRestante = subMoney(montoRestante, aplicarAPrincipal);
 
       if (montoRestante > 0) {
         const otrasFacturas = await tx.factura.findMany({
@@ -860,7 +873,7 @@ export class FinanzasService {
           if (montoRestante <= 0) break;
           const saldoF = Number(f.saldoPendiente);
           const aplicar = Math.min(montoRestante, saldoF);
-          const nuevoSaldo = Math.round((saldoF - aplicar) * 100) / 100;
+          const nuevoSaldo = subMoney(saldoF, aplicar);
 
           await tx.factura.update({
             where: { id: f.id },
@@ -879,13 +892,13 @@ export class FinanzasService {
               cajaId: targetCajaId,
               monto: aplicar,
               metodo: dto.metodo,
-              referencia: `Excedente de ${facturaPrincipal.id}`,
+              referencia: `Excedente de ${facturaPrincipal.codigo || facturaPrincipal.id}`,
               fechaPago: dto.fechaPago ? new Date(dto.fechaPago) : new Date(),
               registradoPorId: usuarioId,
               observaciones: `Pago automático aplicado`,
             } as any,
           });
-          montoRestante = Math.round((montoRestante - aplicar) * 100) / 100;
+          montoRestante = subMoney(montoRestante, aplicar);
         }
       }
       return pago;
@@ -945,7 +958,8 @@ export class FinanzasService {
         ? new Date(dto.fechaProgramadaPago)
         : null,
       prioridad: dto.prioridad || 'MEDIA',
-      saldoPendiente: monto,
+      saldoPendiente: estado === 'PAGADO' ? 0 : monto,
+      montoPagado: estado === 'PAGADO' ? monto : 0,
       estado,
     };
 
@@ -960,8 +974,8 @@ export class FinanzasService {
         include: { proveedor: true, proyecto: true },
       });
 
-      // Intentar bloquear fondos (solo si está aprobado o pagado directamente)
-      if (gasto.estado === 'APROBADO' || gasto.estado === 'PAGADO') {
+      // Intentar bloquear fondos (si está APROBADO) o ejecutar egreso directo (si nace PAGADO)
+      if (gasto.estado === 'APROBADO') {
         await this.blockFunds(
           Number(gasto.montoTotal),
           gasto.concepto,
@@ -971,6 +985,18 @@ export class FinanzasService {
           targetCajaId || undefined,
           tx,
         );
+      } else if (gasto.estado === 'PAGADO') {
+        await this.executeExpense(
+          Number(gasto.montoTotal),
+          `Pago directo: ${gasto.concepto}`,
+          'GASTO',
+          gasto.id,
+          usuarioId,
+          targetCajaId || undefined,
+          false,
+          tx,
+        );
+        await this.handleLogisticsAutomation(tx, gasto, usuarioId);
       }
       
       if (gasto.proyectoId) {
@@ -1010,9 +1036,6 @@ export class FinanzasService {
   }
 
   async updateGasto(id: string, dto: any, usuarioId?: string) {
-    const currentGasto = await this.prisma.gasto.findUnique({ where: { id } });
-    if (!currentGasto) throw new NotFoundException('Gasto no encontrado');
-
     const data: any = { ...dto };
     if (dto.fechaEmision) data.fechaEmision = new Date(dto.fechaEmision);
     if (dto.fechaVencimiento)
@@ -1027,6 +1050,12 @@ export class FinanzasService {
     if (data.cajaId === '') data.cajaId = null;
 
     return this.prisma.$transaction(async (tx) => {
+      const currentGasto = await tx.gasto.findUnique({ where: { id } });
+      if (!currentGasto) throw new NotFoundException('Gasto no encontrado');
+      if (currentGasto.estado === 'ANULADO') {
+        throw new BadRequestException('No se puede modificar un gasto ANULADO.');
+      }
+
       const updatedGasto = await tx.gasto.update({
         where: { id },
         data,
@@ -1036,6 +1065,15 @@ export class FinanzasService {
         (currentGasto.estado === 'PENDIENTE' || currentGasto.estado === 'SOLICITADO') && 
         data.estado === 'APROBADO'
       ) {
+        await this.blockFunds(
+          Number(updatedGasto.montoTotal),
+          updatedGasto.concepto,
+          'GASTO',
+          updatedGasto.id,
+          usuarioId || updatedGasto.registradoPorId,
+          updatedGasto.cajaId ?? undefined,
+          tx,
+        );
         await this.handleLogisticsApprovalAutomation(tx, updatedGasto);
       }
 
@@ -1056,6 +1094,13 @@ export class FinanzasService {
           tx,
         );
 
+        await tx.gasto.update({
+          where: { id },
+          data: {
+            saldoPendiente: 0,
+          },
+        });
+
         await this.handleLogisticsAutomation(
           tx,
           updatedGasto,
@@ -1074,22 +1119,20 @@ export class FinanzasService {
   }
 
   async approveGasto(id: string, usuarioId: string, cajaId?: string) {
-    const gasto = await this.prisma.gasto.findUnique({
-      where: { id },
-      include: { proyecto: true },
-    });
-    if (!gasto) throw new NotFoundException('Gasto no encontrado');
-
     const user = await this.prisma.usuario.findUnique({
       where: { id: usuarioId },
     });
     if (!user) throw new NotFoundException('Usuario no encontrado');
 
-    const isAdmin = user.rol === 'ADMIN';
-    // SUPERVISOR, ADMIN o FINANZAS pueden actuar como Finanzas (Mellani)
     const canApproveFinanzas = user.rol === 'ADMIN' || user.rol === 'SUPERVISOR' || user.rol === 'FINANZAS';
 
     return this.prisma.$transaction(async (tx) => {
+      const gasto = await tx.gasto.findUnique({
+        where: { id },
+        include: { proyecto: true },
+      });
+      if (!gasto) throw new NotFoundException('Gasto no encontrado');
+
       const dataToUpdate: any = {};
       let needsBlocking = false;
 
@@ -1155,17 +1198,51 @@ export class FinanzasService {
 
     const result = await this.prisma.$transaction(async (tx) => {
       // 1. REVERTIR SALDO EN CAJA por cada pago vinculado al gasto (se devuelve el dinero)
+      let totalRevertido = 0;
       for (const pago of gasto.pagos) {
         const dbCaja = await tx.caja.findUnique({ where: { id: pago.cajaId } });
         if (dbCaja) {
-          const nuevoReal = Number(dbCaja.saldoReal) + Number(pago.monto); // Es un gasto, sumamos al revertir
+          const nuevoReal = addMoney(dbCaja.saldoReal, pago.monto); // Es un gasto, sumamos al revertir
           await tx.caja.update({
             where: { id: pago.cajaId },
             data: {
               saldoReal: nuevoReal,
-              saldoDisponible: nuevoReal - Number(dbCaja.saldoComprometido),
+              saldoDisponible: subMoney(nuevoReal, dbCaja.saldoComprometido),
             },
           });
+          totalRevertido = addMoney(totalRevertido, pago.monto);
+        }
+      }
+
+      // Si el gasto estaba PAGADO pero no tenía registros individuales en tabla Pago, devolver el montoTotal a la caja
+      if (gasto.estado === 'PAGADO' && totalRevertido === 0 && gasto.cajaId) {
+        const dbCaja = await tx.caja.findUnique({ where: { id: gasto.cajaId } });
+        if (dbCaja) {
+          const nuevoReal = addMoney(dbCaja.saldoReal, gasto.montoTotal);
+          await tx.caja.update({
+            where: { id: gasto.cajaId },
+            data: {
+              saldoReal: nuevoReal,
+              saldoDisponible: subMoney(nuevoReal, dbCaja.saldoComprometido),
+            },
+          });
+        }
+      }
+
+      // 1.b LIBERAR FONDOS COMPROMETIDOS si el gasto estaba APROBADO o PENDIENTE
+      if (['APROBADO', 'PENDIENTE', 'SOLICITADO'].includes(gasto.estado) && gasto.cajaId) {
+        const totalPagado = sumMoneyBy(gasto.pagos, (p) => p.monto);
+        const montoPorLiberar = subMoney(gasto.montoTotal, totalPagado);
+        if (montoPorLiberar > 0) {
+          await this.releaseFunds(
+            montoPorLiberar,
+            `Liberación por anulación de gasto`,
+            'GASTO',
+            gasto.id,
+            usuarioId || gasto.registradoPorId,
+            gasto.cajaId,
+            tx,
+          );
         }
       }
 
@@ -1330,7 +1407,13 @@ export class FinanzasService {
       // 1. Revertir saldo en caja
       const dbCaja = await tx.caja.findUnique({ where: { id: pago.cajaId } });
       if (dbCaja) {
-        const nuevoReal = Number(dbCaja.saldoReal) - Number(pago.monto);
+        const esGasto = Boolean(pago.gastoId);
+        // Si borramos un pago de GASTO (era egreso), devolvemos el dinero (+)
+        // Si borramos un pago de FACTURA (era ingreso), descontamos el dinero (-)
+        const nuevoReal = esGasto
+          ? Number(dbCaja.saldoReal) + Number(pago.monto)
+          : Number(dbCaja.saldoReal) - Number(pago.monto);
+
         await tx.caja.update({
           where: { id: pago.cajaId },
           data: {
@@ -1343,9 +1426,9 @@ export class FinanzasService {
         await tx.transaccionCaja.create({
           data: {
             cajaId: pago.cajaId,
-            tipo: 'EGRESO',
+            tipo: esGasto ? 'INGRESO' : 'EGRESO',
             monto: Number(pago.monto),
-            concepto: `ELIMINACIÓN PAGO: ${pago.factura?.codigo || pago.gasto?.codigo || 'S/N'}`,
+            concepto: `ELIMINACIÓN PAGO: ${pago.factura?.codigo || pago.gasto?.concepto || 'S/N'}`,
             referenciaTipo: pago.facturaId ? 'FACTURA' : 'GASTO',
             referenciaId: pago.facturaId || pago.gastoId,
             usuarioId: 'system',
@@ -1466,33 +1549,33 @@ export class FinanzasService {
     if (esProtegida !== undefined) updateData.esProtegida = esProtegida;
     if (esPrincipal !== undefined) updateData.esPrincipal = esPrincipal;
 
-    // Si se ajusta el saldo manualmente, creamos una transacción de ajuste
-    if (
-      saldoReal !== undefined &&
-      Number(saldoReal) !== Number(current.saldoReal)
-    ) {
-      const nuevoReal = Number(saldoReal);
-      const diferencia = nuevoReal - Number(current.saldoReal);
-      const tipoTransaccion = diferencia > 0 ? 'INGRESO' : 'EGRESO';
-
-      updateData.saldoReal = nuevoReal;
-      updateData.saldoDisponible =
-        nuevoReal - Number(current.saldoComprometido);
-
-      await this.prisma.transaccionCaja.create({
-        data: {
-          cajaId: id,
-          tipo: tipoTransaccion,
-          monto: Math.abs(diferencia),
-          concepto: `Ajuste manual: ${motivoAjuste || 'Sin motivo'}`,
-          usuarioId,
-          saldoRealPrevio: Number(current.saldoReal),
-          saldoRealNuevo: nuevoReal,
-        } as any,
-      });
-    }
-
     return this.prisma.$transaction(async (tx) => {
+      // Si se ajusta el saldo manualmente, creamos una transacción de ajuste dentro de la transacción DB
+      if (
+        saldoReal !== undefined &&
+        Number(saldoReal) !== Number(current.saldoReal)
+      ) {
+        const nuevoReal = Number(saldoReal);
+        const diferencia = nuevoReal - Number(current.saldoReal);
+        const tipoTransaccion = diferencia > 0 ? 'INGRESO' : 'EGRESO';
+
+        updateData.saldoReal = nuevoReal;
+        updateData.saldoDisponible =
+          nuevoReal - Number(current.saldoComprometido);
+
+        await tx.transaccionCaja.create({
+          data: {
+            cajaId: id,
+            tipo: tipoTransaccion,
+            monto: Math.abs(diferencia),
+            concepto: `Ajuste manual: ${motivoAjuste || 'Sin motivo'}`,
+            usuarioId,
+            saldoRealPrevio: Number(current.saldoReal),
+            saldoRealNuevo: nuevoReal,
+          } as any,
+        });
+      }
+
       if (esPrincipal) {
         await tx.caja.updateMany({
           where: { subtipo: subtipo || current.subtipo },
@@ -1531,7 +1614,7 @@ export class FinanzasService {
 
   async transferFunds(dto: any, usuarioId: string) {
     const { origenId, destinoId, monto, concepto } = dto;
-    const montoNum = Number(monto);
+    const montoNum = roundMoney(monto);
 
     if (origenId === destinoId)
       throw new BadRequestException(
@@ -1565,22 +1648,22 @@ export class FinanzasService {
         );
 
       // 1. Descontar de Origen
-      const nuevoRealOrigen = Number(origen.saldoReal) - montoNum;
+      const nuevoRealOrigen = subMoney(origen.saldoReal, montoNum);
       await tx.caja.update({
         where: { id: origenId },
         data: {
           saldoReal: nuevoRealOrigen,
-          saldoDisponible: nuevoRealOrigen - Number(origen.saldoComprometido),
+          saldoDisponible: subMoney(nuevoRealOrigen, origen.saldoComprometido),
         },
       });
 
       // 2. Aumentar en Destino
-      const nuevoRealDestino = Number(destino.saldoReal) + montoNum;
+      const nuevoRealDestino = addMoney(destino.saldoReal, montoNum);
       await tx.caja.update({
         where: { id: destinoId },
         data: {
           saldoReal: nuevoRealDestino,
-          saldoDisponible: nuevoRealDestino - Number(destino.saldoComprometido),
+          saldoDisponible: subMoney(nuevoRealDestino, destino.saldoComprometido),
         },
       });
 
