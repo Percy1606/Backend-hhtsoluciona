@@ -334,4 +334,33 @@ export class LogisticaController {
   async getPresupuestoProyecto(@Param('proyectoId') proyectoId: string) {
     return this.logisticaService.getPresupuestoProyecto(proyectoId);
   }
+
+  // ============================================
+  // CERTIFICADOS DE EQUIPOS
+  // ============================================
+  @Post('certificados-equipos')
+  async createCertificadoEquipo(
+    @Body() data: { nombre: string; fechaCalibracion: string; fechaVencimiento: string; url: string; tamano?: string },
+    @Req() req: any,
+  ) {
+    return this.logisticaService.createCertificadoEquipo(data, req.user.id);
+  }
+
+  @Get('certificados-equipos')
+  async getCertificadosEquipos(@Query('search') search?: string) {
+    return this.logisticaService.getCertificadosEquipos(search);
+  }
+
+  @Put('certificados-equipos/:id')
+  async updateCertificadoEquipo(
+    @Param('id') id: string,
+    @Body() data: { nombre?: string; fechaCalibracion?: string; fechaVencimiento?: string; url?: string; tamano?: string },
+  ) {
+    return this.logisticaService.updateCertificadoEquipo(id, data);
+  }
+
+  @Delete('certificados-equipos/:id')
+  async deleteCertificadoEquipo(@Param('id') id: string) {
+    return this.logisticaService.deleteCertificadoEquipo(id);
+  }
 }

@@ -17,6 +17,9 @@ import {
   EstadoGasto,
   ClasificacionFinanciera,
   CategoriaDistribucion,
+  TipoDocumento,
+  EstadoDocumento,
+  Area,
 } from '@prisma/client';
 import { deletePhysicalFiles } from '../common/utils/file-utils';
 
@@ -1080,5 +1083,80 @@ export class LogisticaService {
     if (montoNuevaOrden > saldoDisponible && !aprobarConCredito && !isSobregiroAutorizado) {
       throw new BadRequestException(`No existe saldo suficiente para aprobar esta compra. La orden excede el presupuesto disponible del proyecto en S/ ${(montoNuevaOrden - saldoDisponible).toFixed(2)}. \n\nPresupuesto: S/ ${costoPresupuestado.toFixed(2)} \nComprometido/Ejecutado: S/ ${totalConsumido.toFixed(2)} \nSaldo Disponible: S/ ${saldoDisponible.toFixed(2)} \nNueva Compra: S/ ${montoNuevaOrden.toFixed(2)}`);
     }
+  }
+
+  // ============================================
+  // CERTIFICADOS DE EQUIPOS
+  // ============================================
+
+  async createCertificadoEquipo(
+    data: { nombre: string; fechaCalibracion: string; fechaVencimiento: string; url: string; tamano?: string },
+    userId: string,
+  ) {
+    return this.prisma.documento.create({
+      data: {
+        nombre: data.nombre,
+        tipo: TipoDocumento.Tecnica,
+        subtype: 'CertificadoEquipo',
+        url: data.url,
+        estado: EstadoDocumento.Aprobado,
+        subidoPor: userId,
+        tamano: data.tamano || null,
+        fechaVencimiento: new Date(data.fechaVencimiento),
+        observaciones: data.fechaCalibracion,
+        area: Area.LogisticaYRecursos,
+      },
+    });
+  }
+
+  async getCertificadosEquipos(search?: string) {
+    const where: any = {
+      subtype: 'CertificadoEquipo',
+    };
+    if (search) {
+      where.nombre = { contains: search };
+    }
+    return this.prisma.documento.findMany({
+      where,
+      orderBy: { fechaSubida: 'desc' },
+    });
+  }
+
+  async updateCertificadoEquipo(
+    id: string,
+    data: { nombre?: string; fechaCalibracion?: string; fechaVencimiento?: string; url?: string; tamano?: string },
+  ) {
+    const cert = await this.prisma.documento.findFirst({
+      where: { id, subtype: 'CertificadoEquipo' },
+    });
+    if (!cert) throw new NotFoundException('Certificado no encontrado');
+
+    const updateData: any = {};
+    if (data.nombre) updateData.nombre = data.nombre;
+    if (data.fechaCalibracion) updateData.observaciones = data.fechaCalibracion;
+    if (data.fechaVencimiento) updateData.fechaVencimiento = new Date(data.fechaVencimiento);
+    if (data.url !== undefined) {
+      updateData.url = data.url;
+      updateData.tamano = data.tamano || null;
+    }
+
+    return this.prisma.documento.update({
+      where: { id },
+      data: updateData,
+    });
+  }
+
+  async deleteCertificadoEquipo(id: string) {
+    const cert = await this.prisma.documento.findFirst({
+      where: { id, subtype: 'CertificadoEquipo' },
+    });
+    if (!cert) throw new NotFoundException('Certificado no encontrado');
+
+    // Eliminar archivo físico
+    if (cert.url) {
+      await deletePhysicalFiles([cert.url]);
+    }
+
+    return this.prisma.documento.delete({ where: { id } });
   }
 }
