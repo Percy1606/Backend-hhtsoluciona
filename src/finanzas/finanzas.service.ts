@@ -3766,4 +3766,36 @@ export class FinanzasService {
     fs.writeFileSync(configPath, JSON.stringify({ porcentajeRenta }));
     return { success: true, porcentajeRenta };
   }
+
+  async getGastosOperativosStats(mes?: string, anio?: string) {
+    const today = new Date();
+    const m = (mes === 'all' || !mes) ? today.getMonth() : parseInt(mes) - 1;
+    const a = (anio === 'all' || !anio) ? today.getFullYear() : parseInt(anio);
+    
+    const start = new Date(a, m, 1);
+    const end = new Date(a, m + 1, 0, 23, 59, 59, 999);
+
+    const gastos = await this.prisma.gasto.findMany({
+      where: {
+        tipo: { in: ['PLANILLA', 'ADMINISTRATIVO', 'SERVICIOS'] },
+        estado: { in: ['PAGADO', 'APROBADO', 'PENDIENTE'] as any },
+        createdAt: { gte: start, lte: end }
+      },
+      select: { tipo: true, montoTotal: true }
+    });
+
+    const real = {
+      planilla: 0,
+      administrativo: 0,
+      servicios: 0
+    };
+
+    for (const g of gastos) {
+      if (g.tipo === 'PLANILLA') real.planilla += Number(g.montoTotal);
+      if (g.tipo === 'ADMINISTRATIVO') real.administrativo += Number(g.montoTotal);
+      if (g.tipo === 'SERVICIOS') real.servicios += Number(g.montoTotal);
+    }
+
+    return real;
+  }
 }

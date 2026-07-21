@@ -770,5 +770,12 @@ export class FinanzasController {
     if (porcentajeRenta === undefined) throw new BadRequestException('Falta porcentajeRenta');
     return this.finanzasService.updateTaxConfig(Number(porcentajeRenta));
   }
+
+  @Get('gastos-operativos-stats')
+  @UseGuards(ModulesGuard)
+  @Modules('finanzas')
+  getGastosOperativosStats(@Query('mes') mes: string, @Query('anio') anio: string) {
+    return this.finanzasService.getGastosOperativosStats(mes, anio);
+  }
 }
 
