@@ -15,6 +15,7 @@ import { AuditoriaModule } from './auditoria/auditoria.module';
 import { LogisticaModule } from './logistica/logistica.module';
 import { FinanzasModule } from './finanzas/finanzas.module';
 import { FilesModule } from './files/files.module';
+import { LibraryModule } from './library/library.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { FilesModule } from './files/files.module';
     LogisticaModule,
     FinanzasModule,
     FilesModule,
+    LibraryModule,
   ],
   controllers: [AppController],
   providers: [AppService],

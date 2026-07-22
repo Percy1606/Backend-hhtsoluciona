@@ -39,6 +39,7 @@
     "class-validator": "^0.15.1",
     "docx": "^9.7.1",
     "docxtemplater": "^3.68.7",
+    "googleapis": "^173.0.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "mariadb": "^3.5.2",
