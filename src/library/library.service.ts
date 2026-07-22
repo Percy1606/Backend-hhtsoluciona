@@ -216,7 +216,7 @@ export class LibraryService implements OnModuleInit {
         { responseType: 'stream' }
       );
 
-      driveRes.data.on('error', (err) => {
+      driveRes.data.on('error', (err: any) => {
         this.logger.error('Error downloading stream from Drive', err);
       });
 
