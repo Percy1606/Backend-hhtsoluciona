@@ -18,6 +18,7 @@ export interface LibraryResource {
   mimeType: string;
   fileName: string;
   createdAt: string;
+  folderId?: string;
 }
 
 @Injectable()
@@ -155,6 +156,7 @@ export class LibraryService implements OnModuleInit {
         mimeType: file.mimetype,
         fileName: file.originalname,
         createdAt: new Date().toISOString(),
+        folderId: targetFolderId,
       };
 
       resources.push(newResource);
@@ -224,6 +226,100 @@ export class LibraryService implements OnModuleInit {
     } catch (error: any) {
       this.logger.error(`Error streaming file from Drive: ${error.message}`);
       res.status(500).send('Error streaming video');
+    }
+  }
+
+  async updateResource(id: string, body: any): Promise<LibraryResource> {
+    const resources = this.getResources();
+    const index = resources.findIndex(r => r.id === id);
+    if (index === -1) {
+      throw new HttpException('Resource not found', HttpStatus.NOT_FOUND);
+    }
+    
+    if (body.title !== undefined) resources[index].title = body.title;
+    if (body.description !== undefined) resources[index].description = body.description;
+    if (body.clientOrService !== undefined) resources[index].clientOrService = body.clientOrService;
+    if (body.category !== undefined) resources[index].category = body.category;
+    if (body.folderId !== undefined) resources[index].folderId = body.folderId;
+
+    this.saveResources(resources);
+    return resources[index];
+  }
+
+  async syncWithDrive(): Promise<{ added: number }> {
+    if (!this.drive) {
+      throw new HttpException('Google Drive API not initialized', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    try {
+      // 1. Obtener subcarpetas
+      const folderRes = await this.drive.files.list({
+        q: `'${this.driveFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+        fields: 'files(id, name)',
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+      const subfolders = folderRes.data.files || [];
+      const folderIds = [this.driveFolderId, ...subfolders.map(f => f.id)];
+
+      // 2. Obtener archivos de la raíz y las subcarpetas
+      const driveFiles = [];
+      for (const folderId of folderIds) {
+        const fileRes = await this.drive.files.list({
+          q: `'${folderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
+          fields: 'files(id, name, mimeType, webViewLink, webContentLink, createdTime)',
+          supportsAllDrives: true,
+          includeItemsFromAllDrives: true,
+        });
+        const files = fileRes.data.files || [];
+        files.forEach(f => (f as any).parentId = folderId);
+        driveFiles.push(...files);
+      }
+
+      const resources = this.getResources();
+      let added = 0;
+
+      for (const driveFile of driveFiles) {
+        const exists = resources.some(r => r.driveFileId === driveFile.id);
+        if (!exists) {
+          const newResource: LibraryResource = {
+            id: uuidv4(),
+            title: driveFile.name || 'Archivo Sincronizado',
+            description: 'Sincronizado desde Google Drive',
+            clientOrService: 'Por asignar',
+            date: driveFile.createdTime || new Date().toISOString(),
+            category: 'general',
+            driveFileId: driveFile.id as string,
+            driveWebViewLink: driveFile.webViewLink || undefined,
+            driveWebContentLink: driveFile.webContentLink || undefined,
+            mimeType: driveFile.mimeType || 'application/octet-stream',
+            fileName: driveFile.name || 'archivo',
+            createdAt: driveFile.createdTime || new Date().toISOString(),
+            folderId: (driveFile as any).parentId,
+          };
+          resources.push(newResource);
+          added++;
+          
+          try {
+            await this.drive.permissions.create({
+              fileId: driveFile.id as string,
+              requestBody: { role: 'reader', type: 'anyone' },
+              supportsAllDrives: true
+            });
+          } catch(e) {
+            this.logger.error('Could not set permissions for synced file', e);
+          }
+        }
+      }
+
+      if (added > 0) {
+        this.saveResources(resources);
+      }
+
+      return { added };
+    } catch (error: any) {
+      this.logger.error(`Error syncing with Drive: ${error.message}`, error.stack);
+      throw new HttpException('Error syncing with Drive', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 }

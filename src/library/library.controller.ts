@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Param, Body, UseInterceptors, UploadedFile, UseGuards, Res } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Body, UseInterceptors, UploadedFile, UseGuards, Res } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { LibraryService } from './library.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'; // Assuming there is a JwtAuthGuard
@@ -41,5 +41,15 @@ export class LibraryController {
   @Delete(':id')
   async delete(@Param('id') id: string) {
     return this.libraryService.deleteResource(id);
+  }
+
+  @Post('sync')
+  async syncDrive() {
+    return this.libraryService.syncWithDrive();
+  }
+
+  @Put(':id')
+  async update(@Param('id') id: string, @Body() body: any) {
+    return this.libraryService.updateResource(id, body);
   }
 }
