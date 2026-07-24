@@ -16,6 +16,7 @@ import { LogisticaModule } from './logistica/logistica.module';
 import { FinanzasModule } from './finanzas/finanzas.module';
 import { FilesModule } from './files/files.module';
 import { LibraryModule } from './library/library.module';
+import { WhatsappModule } from './whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { LibraryModule } from './library/library.module';
     FinanzasModule,
     FilesModule,
     LibraryModule,
+    WhatsappModule,
   ],
   controllers: [AppController],
   providers: [AppService],
