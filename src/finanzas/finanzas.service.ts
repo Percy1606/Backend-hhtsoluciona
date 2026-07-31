@@ -962,10 +962,18 @@ export class FinanzasService {
       estado,
     };
 
-    if (data.proveedorId === '' || data.proveedorId === 'none') data.proveedorId = null;
-    if (data.proyectoId === '' || data.proyectoId === 'none') data.proyectoId = null;
-    if (data.ordenCompraId === '' || data.ordenCompraId === 'none') data.ordenCompraId = null;
-    data.cajaId = (targetCajaId === '' || targetCajaId === 'none') ? null : targetCajaId;
+    if (!data.proveedorId || data.proveedorId === 'none') delete data.proveedorId;
+    if (!data.proyectoId || data.proyectoId === 'none') delete data.proyectoId;
+    if (!data.ordenCompraId || data.ordenCompraId === 'none') delete data.ordenCompraId;
+    if (!targetCajaId || targetCajaId === 'none') delete data.cajaId;
+    else data.cajaId = targetCajaId;
+
+    // Eliminar propiedades undefined o null para evitar errores de validación en Prisma Client
+    Object.keys(data).forEach((key) => {
+      if (data[key] === undefined || data[key] === null) {
+        delete data[key];
+      }
+    });
 
     return this.prisma.$transaction(async (tx) => {
       const gasto = await tx.gasto.create({
