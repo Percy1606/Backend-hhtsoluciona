@@ -78,25 +78,22 @@ export class LogisticaService {
       where.categoria = categoria;
     }
 
-    // Filtro por estado de stock
+    let allItems = await this.prisma.insumo.findMany({
+      where,
+      orderBy: { nombre: 'asc' },
+      include: {
+        _count: { select: { movimientos: true } },
+      },
+    });
+
     if (stockStatus === 'bajo') {
-      where.stockActual = { lte: this.prisma.insumo.fields.stockMinimo }; // stockActual <= stockMinimo
+      allItems = allItems.filter((i) => Number(i.stockActual) <= Number(i.stockMinimo));
     } else if (stockStatus === 'disponible') {
-      where.stockActual = { gt: this.prisma.insumo.fields.stockMinimo }; // stockActual > stockMinimo
+      allItems = allItems.filter((i) => Number(i.stockActual) > Number(i.stockMinimo));
     }
 
-    const [data, total] = await Promise.all([
-      this.prisma.insumo.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { nombre: 'asc' },
-        include: {
-          _count: { select: { movimientos: true } },
-        },
-      }),
-      this.prisma.insumo.count({ where }),
-    ]);
+    const total = allItems.length;
+    const data = allItems.slice(skip, skip + limit);
 
     // Calcular inversión total aproximada (esto es pesado en grandes volúmenes, pero útil para el KPI)
     // Para mayor precisión en grandes datos, se usaría un query raw o una tabla de agregación.
