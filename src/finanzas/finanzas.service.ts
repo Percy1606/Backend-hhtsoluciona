@@ -959,13 +959,12 @@ export class FinanzasService {
         : null,
       prioridad: dto.prioridad || 'MEDIA',
       saldoPendiente: estado === 'PAGADO' ? 0 : monto,
-      montoPagado: estado === 'PAGADO' ? monto : 0,
       estado,
     };
 
-    if (data.proveedorId === '') data.proveedorId = null;
-    if (data.proyectoId === '') data.proyectoId = null;
-    if (data.ordenCompraId === '') data.ordenCompraId = null;
+    if (data.proveedorId === '' || data.proveedorId === 'none') data.proveedorId = null;
+    if (data.proyectoId === '' || data.proyectoId === 'none') data.proyectoId = null;
+    if (data.ordenCompraId === '' || data.ordenCompraId === 'none') data.ordenCompraId = null;
     data.cajaId = (targetCajaId === '' || targetCajaId === 'none') ? null : targetCajaId;
 
     return this.prisma.$transaction(async (tx) => {
