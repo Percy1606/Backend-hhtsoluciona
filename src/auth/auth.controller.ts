@@ -5,10 +5,13 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  Req,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { ThrottlerGuard } from '@nestjs/throttler';
+import { JwtAuthGuard } from './jwt-auth.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -19,5 +22,22 @@ export class AuthController {
   @Post('login')
   async login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @Post('verify-password')
+  async verifyPassword(@Req() req: any, @Body('password') password: string) {
+    if (!password) {
+      throw new UnauthorizedException('Debe proporcionar una contraseña');
+    }
+    const isValid = await this.authService.verifyAdminPassword(password, req.user?.id);
+    if (!isValid) {
+      const isAnyAdminValid = await this.authService.verifyAdminPassword(password);
+      if (!isAnyAdminValid) {
+        throw new UnauthorizedException('Contraseña de administrador incorrecta.');
+      }
+    }
+    return { valid: true };
   }
 }

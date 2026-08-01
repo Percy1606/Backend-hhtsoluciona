@@ -1468,6 +1468,14 @@ export class OperacionesService {
         recomendaciones: dto.recomendaciones,
         estado: dto.estado || 'PENDIENTE',
         firmaTecnico: dto.firmaTecnico,
+        costoMovilidad: dto.costoMovilidad ? Number(dto.costoMovilidad) : 0,
+        costoViaticos: dto.costoViaticos ? Number(dto.costoViaticos) : 0,
+        costoOtros: dto.costoOtros ? Number(dto.costoOtros) : 0,
+        costoTotal: dto.costoTotal !== undefined 
+          ? Number(dto.costoTotal) 
+          : (Number(dto.costoMovilidad || 0) + Number(dto.costoViaticos || 0) + Number(dto.costoOtros || 0)),
+        observacionesCostos: dto.observacionesCostos || null,
+        gastosImputados: dto.gastosImputados || false,
         adjuntos: {
           create:
             dto.adjuntos?.map((adj: any) => ({
@@ -1659,6 +1667,18 @@ export class OperacionesService {
       ...rest,
       fechaVisita: dto.fechaVisita ? new Date(dto.fechaVisita) : undefined,
     };
+    if (rest.costoMovilidad !== undefined) data.costoMovilidad = Number(rest.costoMovilidad);
+    if (rest.costoViaticos !== undefined) data.costoViaticos = Number(rest.costoViaticos);
+    if (rest.costoOtros !== undefined) data.costoOtros = Number(rest.costoOtros);
+    if (rest.costoTotal !== undefined) {
+      data.costoTotal = Number(rest.costoTotal);
+    } else if (rest.costoMovilidad !== undefined || rest.costoViaticos !== undefined || rest.costoOtros !== undefined) {
+      const current = await this.prisma.fichaTecnica.findUnique({ where: { id } });
+      const m = rest.costoMovilidad !== undefined ? Number(rest.costoMovilidad) : Number(current?.costoMovilidad || 0);
+      const v = rest.costoViaticos !== undefined ? Number(rest.costoViaticos) : Number(current?.costoViaticos || 0);
+      const o = rest.costoOtros !== undefined ? Number(rest.costoOtros) : Number(current?.costoOtros || 0);
+      data.costoTotal = m + v + o;
+    }
     if (datosTecnicos !== undefined) data.datosTecnicos = datosTecnicos;
     if (adjuntos && Array.isArray(adjuntos)) {
       // 1. Obtener URLs de adjuntos antiguos para borrarlos físicamente

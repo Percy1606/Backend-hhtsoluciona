@@ -359,6 +359,13 @@ model FichaTecnica {
   recomendaciones String?             @db.Text
   estado        String                // PENDIENTE | COMPLETADA | OBSERVADA
   firmaTecnico  String?               @db.Text // Base64 or URL
+
+  costoMovilidad      Decimal?         @default(0.00) @db.Decimal(18, 2)
+  costoViaticos       Decimal?         @default(0.00) @db.Decimal(18, 2)
+  costoOtros          Decimal?         @default(0.00) @db.Decimal(18, 2)
+  costoTotal          Decimal?         @default(0.00) @db.Decimal(18, 2)
+  observacionesCostos String?          @db.Text
+  gastosImputados     Boolean          @default(false)
   
   datosTecnicos Json?                 @default("{}")
   adjuntos      FichaTecnicaAdjunto[]

@@ -489,6 +489,90 @@ export class CotizacionesService {
             },
           });
         }
+
+        // 4. IMPUTACIÓN AUTOMÁTICA DE COSTOS DE VISITA TÉCNICA
+        try {
+          const fichasConCostos = await tx.fichaTecnica.findMany({
+            where: {
+              clienteId: cotizacion.clientId,
+              gastosImputados: false,
+            },
+          });
+
+          for (const ficha of fichasConCostos) {
+            const montoTotal = Number(ficha.costoTotal || 0);
+            if (montoTotal > 0) {
+              const datosTec: any = ficha.datosTecnicos || {};
+              const gastosDetalle = Array.isArray(datosTec.gastosDetalle) ? datosTec.gastosDetalle : [];
+              const fechaVisitaFmt = ficha.fechaVisita ? new Date(ficha.fechaVisita).toLocaleDateString('es-PE') : '';
+
+              if (gastosDetalle.length > 0) {
+                for (const item of gastosDetalle) {
+                  const itemMonto = Number(item.monto || 0);
+                  if (itemMonto > 0) {
+                    const countGastos = await tx.gasto.count();
+                    const codigoGasto = `GAS-${String(countGastos + 1).padStart(5, '0')}`;
+                    const catFmt = item.categoria ? `[${item.categoria}] ` : '';
+                    const conceptoGasto = `Visita Técnica (${fechaVisitaFmt}): ${catFmt}${item.concepto || 'Gasto de inspección'}`;
+
+                    await tx.gasto.create({
+                      data: {
+                        codigo: codigoGasto,
+                        proyectoId: proyecto.id,
+                        tipo: 'OPERATIVO',
+                        clasificacion: 'VENTA_SERVICIO',
+                        concepto: conceptoGasto,
+                        montoTotal: itemMonto,
+                        saldoPendiente: itemMonto,
+                        tipoComprobante: item.comprobanteUrl ? 'FACTURA' : 'OTRO',
+                        comprobanteUrl: item.comprobanteUrl || null,
+                        aplicaImpuestos: false,
+                        montoSubtotal: itemMonto,
+                        montoIgv: 0,
+                        fechaEmision: ficha.fechaVisita || hoy,
+                        estado: 'APROBADO',
+                        registradoPorId: user?.id || 'SISTEMA',
+                      },
+                    });
+                  }
+                }
+              } else {
+                const countGastos = await tx.gasto.count();
+                const codigoGasto = `GAS-${String(countGastos + 1).padStart(5, '0')}`;
+                const detalleObs = ficha.observacionesCostos ? ` - ${ficha.observacionesCostos}` : '';
+                const conceptoGasto = `Gasto de Visita Técnica (${fechaVisitaFmt})${detalleObs}`;
+
+                await tx.gasto.create({
+                  data: {
+                    codigo: codigoGasto,
+                    proyectoId: proyecto.id,
+                    tipo: 'OPERATIVO',
+                    clasificacion: 'VENTA_SERVICIO',
+                    concepto: conceptoGasto,
+                    montoTotal: montoTotal,
+                    saldoPendiente: montoTotal,
+                    tipoComprobante: 'OTRO',
+                    aplicaImpuestos: false,
+                    montoSubtotal: montoTotal,
+                    montoIgv: 0,
+                    fechaEmision: ficha.fechaVisita || hoy,
+                    estado: 'APROBADO',
+                    registradoPorId: user?.id || 'SISTEMA',
+                  },
+                });
+              }
+
+              await tx.fichaTecnica.update({
+                where: { id: ficha.id },
+                data: { gastosImputados: true },
+              });
+
+              console.log(`[AutoGen] Gastos de Visita Técnica ${ficha.id} (S/ ${montoTotal}) imputados exitosamente al proyecto ${projectCode}`);
+            }
+          }
+        } catch (costoErr: any) {
+          console.error('[AutoGen] Error no bloqueante al imputar gastos de visita técnica:', costoErr.message);
+        }
       });
 
       console.log(`[AutoGen] ✅ Proyecto ${projectCode} y OS ${osCode} generados exitosamente.`);
