@@ -26,7 +26,8 @@ export class CrmCronService {
     // Definición de roles y metas
     const sellers = [
       { name: 'Angie', type: 'cazadora', meta: 15 },
-      { name: 'Ariana', type: 'cazadora', meta: 15 },
+      { name: 'Ariana', type: 'mixta', meta: 15 },
+      { name: 'Brenda', type: 'cazadora', meta: 15 },
       { name: 'Valentina', type: 'cerradora', meta: 15 },
     ];
 
@@ -49,6 +50,28 @@ export class CrmCronService {
           },
         });
         label = 'Nuevos Prospectos';
+      } else if (seller.type === 'mixta') {
+        // Mixtas: Evaluar prospectos y seguimientos de hoy
+        const prospectos = await this.prisma.cliente.count({
+          where: {
+            asignadoA: { contains: seller.name },
+            fechaCreacion: {
+              gte: hoy,
+              lt: manana,
+            },
+          },
+        });
+        const seguimientos = await this.prisma.cliente.count({
+          where: {
+            asignadoA: { contains: seller.name },
+            ultimoContacto: {
+              gte: hoy,
+              lt: manana,
+            },
+          },
+        });
+        avance = prospectos + seguimientos;
+        label = 'Prospectos y Seguimientos';
       } else {
         // Cerradoras: Evaluar seguimientos / contactos realizados hoy
         avance = await this.prisma.cliente.count({
