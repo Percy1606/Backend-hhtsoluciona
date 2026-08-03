@@ -56,7 +56,7 @@ async function main() {
 
     // 2. Cotizaciones de Valentina o sus clientes en Julio
     const cots = await conn.query(`
-      SELECT cot.id, cot.codigo, cot.montoTotal, cot.fechaEmision, cot.estado, c.id as clienteId, c.empresa, c.asignadoA
+      SELECT cot.id, cot.codigo, cot.total, cot.fechaEmision, cot.estado, c.id as clienteId, c.empresa, c.asignadoA
       FROM cotizacion cot
       JOIN cliente c ON cot.clienteId = c.id
       WHERE (c.asignadoA = 'Valentina' OR c.creadoPor = 'Valentina') 
@@ -80,11 +80,11 @@ async function main() {
     for (const cId of Array.from(clienteIds).slice(0, 5)) {
       const c = (await conn.query(`SELECT id, empresa, asignadoA, creadoPor, fechaCreacion, tarifa, etapaComercial FROM cliente WHERE id = ?`, [cId]))[0];
       const allInts = await conn.query(`SELECT fecha, tipo, usuario, observaciones FROM interaccion WHERE clientId = ? ORDER BY fecha ASC`, [cId]);
-      const allCots = await conn.query(`SELECT codigo, montoTotal, fechaEmision, estado FROM cotizacion WHERE clienteId = ? ORDER BY fechaEmision ASC`, [cId]);
+      const allCots = await conn.query(`SELECT codigo, total, fechaEmision, estado FROM cotizacion WHERE clienteId = ? ORDER BY fechaEmision ASC`, [cId]);
 
       console.log(`\n🏢 Cliente: ${c.empresa}`);
       console.log(`   Prospectado el: ${c.fechaCreacion} | Creado por: ${c.creadoPor} | Asignado a: ${c.asignadoA} | Tarifa: ${c.tarifa} | Etapa Actual: ${c.etapaComercial}`);
-      console.log(`   Cotizaciones (${allCots.length}):`, allCots.map(ct => `${ct.codigo} (S/ ${ct.montoTotal})`).join(', '));
+      console.log(`   Cotizaciones (${allCots.length}):`, allCots.map(ct => `${ct.codigo} (S/ ${ct.total})`).join(', '));
       console.log(`   Historial de Interacciones (${allInts.length}):`);
       allInts.forEach(i => {
         const hasImg = i.observaciones && i.observaciones.includes('[IMG]') ? ' 📷 [CON IMAGEN]' : '';
