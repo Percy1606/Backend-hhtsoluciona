@@ -35,7 +35,7 @@ async function main() {
 
     // Actualizar interacciones correspondientes a la fecha u observaciones
     for (const int of cliente.interacciones) {
-      console.log(`  Interacción ID ${int.id}: fecha=${int.fecha}, usuario="${int.usuario}", tipo="${int.tipo}", obs="${int.observaciones || int.comentario || ''}"`);
+      console.log(`  Interacción ID ${int.id}: fecha=${int.fecha}, usuario="${int.usuario}", tipo="${int.tipo}", obs="${int.observaciones || ''}"`);
       
       // Actualizar usuario de la interacción a Valentina
       await prisma.interaccion.update({
