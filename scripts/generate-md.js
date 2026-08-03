@@ -38,7 +38,7 @@ let md = `# 📊 INFORME TÉCNICO Y AUDITORÍA DE GESTIÓN COMERCIAL
 ## Asesora: Valentina | Período: 01 de Julio de 2026 – 30 de Julio de 2026
 **Documento Emitido por:** Área de Ingeniería y Desarrollo de Software  
 **Fecha de Generación:** ${new Date().toLocaleDateString('es-PE', { timeZone: 'America/Lima', dateStyle: 'full' })}  
-**Estado de Verificación:** 100% Empírico y Validado contra Base de Datos Producción (`software_hh_db`)
+**Estado de Verificación:** 100% Empírico y Validado contra Base de Datos Producción (\`software_hh_db\`)
 
 ---
 
