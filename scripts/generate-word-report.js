@@ -522,7 +522,7 @@ async function main() {
     });
 
     const buffer = await Packer.toBuffer(doc);
-    const outputPath = path.resolve('C:\\Users\\percy\\Documents\\SoftwareHH', 'Informe_Gestion_Seguimientos_Comerciales_SoftwareHH.docx');
+    const outputPath = path.resolve(__dirname, 'Informe_Gestion_Seguimientos_Comerciales_SoftwareHH.docx');
     fs.writeFileSync(outputPath, buffer);
     console.log(`\n==================================================`);
     console.log(`DOCUMENTO WORD GENERADO CON ÉXITO EN:`);
