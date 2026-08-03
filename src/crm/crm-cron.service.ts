@@ -23,12 +23,17 @@ export class CrmCronService {
     const manana = new Date(hoy);
     manana.setDate(manana.getDate() + 1);
 
-    // Definición de roles y metas
+    // Definición de Unidades Comerciales y Asesores
     const sellers = [
-      { name: 'Angie', type: 'cazadora', meta: 15 },
-      { name: 'Ariana', type: 'mixta', meta: 15 },
-      { name: 'Brenda', type: 'cazadora', meta: 15 },
-      { name: 'Valentina', type: 'cerradora', meta: 15 },
+      // Unidad 1 - Nuevos Negocios (Creados >= 03/08/2026)
+      { name: 'Ariana', type: 'cazadora', unit: 'UNIDAD_1', meta: 15 },
+      { name: 'Brenda', type: 'cazadora', unit: 'UNIDAD_1', meta: 15 },
+      { name: 'Valentina', type: 'cerradora', unit: 'UNIDAD_1', meta: 15 },
+      // Unidad 2 - Clientes Estratégicos (Cartera Histórica)
+      { name: 'Angie', type: 'mixta', unit: 'UNIDAD_2', meta: 15 },
+      { name: 'Javier', type: 'mixta', unit: 'UNIDAD_2', meta: 15 },
+      { name: 'Mellani', type: 'mixta', unit: 'UNIDAD_2', meta: 15 },
+      { name: 'Steven', type: 'mixta', unit: 'UNIDAD_2', meta: 15 },
     ];
 
     let resumenGlobal = '📋 *REPORTE DE CIERRE DE JORNADA*\n\n';
