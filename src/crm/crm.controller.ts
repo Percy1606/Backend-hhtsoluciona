@@ -77,6 +77,16 @@ export class CrmController {
   }
 
   // RUTAS ESPECÍFICAS PRIMERO
+  @Get('agenda')
+  getAgenda() {
+    return this.crmService.findAllAgenda();
+  }
+
+  @Post('agenda')
+  saveAgenda(@Body() tareas: any[]) {
+    return this.crmService.replaceAgenda(tareas);
+  }
+
   @Post('clientes/bulk')
   @UseGuards(ModulesGuard)
   @Modules('crm')

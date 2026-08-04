@@ -1289,3 +1289,20 @@ model OrdenDeServicio {
   @@index([proyectoId], map: "orden_de_servicio_proyectoId_fkey")
   @@map("orden_de_servicio")
 }
+
+model TareaEstrategica {
+  id                 String   @id @default(uuid())
+  clienteId          String?
+  empresa            String
+  etapaProceso       String
+  actividadInmediata String   @db.Text
+  proximoPaso        String   @db.Text
+  responsable        String
+  fechaCompromiso    String
+  estado             String   
+  subtareas          Json     @default("[]")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@map("tarea_estrategica")
+}

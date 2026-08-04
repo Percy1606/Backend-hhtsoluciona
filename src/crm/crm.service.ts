@@ -719,4 +719,36 @@ export class CrmService {
 
     return result;
   }
+
+  // ============================================
+  // AGENDA DIARIA
+  // ============================================
+  async findAllAgenda() {
+    return this.prisma.tareaEstrategica.findMany({
+      orderBy: { createdAt: 'asc' }
+    });
+  }
+
+  async replaceAgenda(tareas: any[]) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.tareaEstrategica.deleteMany({});
+      if (tareas && tareas.length > 0) {
+        await tx.tareaEstrategica.createMany({
+          data: tareas.map(t => ({
+            id: t.id,
+            clienteId: t.clienteId || null,
+            empresa: t.empresa,
+            etapaProceso: t.etapaProceso,
+            actividadInmediata: t.actividadInmediata,
+            proximoPaso: t.proximoPaso,
+            responsable: t.responsable,
+            fechaCompromiso: t.fechaCompromiso,
+            estado: t.estado,
+            subtareas: t.subtareas || []
+          }))
+        });
+      }
+      return { success: true };
+    });
+  }
 }
