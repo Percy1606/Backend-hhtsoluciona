@@ -1300,7 +1300,7 @@ model TareaEstrategica {
   responsable        String
   fechaCompromiso    String
   estado             String   
-  subtareas          Json     @default("[]")
+  subtareas          Json?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
