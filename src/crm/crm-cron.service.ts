@@ -30,7 +30,7 @@ export class CrmCronService {
       { name: 'Brenda', type: 'cazadora', unit: 'UNIDAD_1', meta: 15 },
       { name: 'Valentina', type: 'cerradora', unit: 'UNIDAD_1', meta: 15 },
       // Unidad 2 - Clientes Estratégicos (Cartera Histórica)
-      { name: 'Angie', type: 'mixta', unit: 'UNIDAD_2', meta: 15 },
+      { name: 'Angi', type: 'mixta', unit: 'UNIDAD_2', meta: 15 },
       { name: 'Javier', type: 'mixta', unit: 'UNIDAD_2', meta: 15 },
       { name: 'Mellani', type: 'mixta', unit: 'UNIDAD_2', meta: 15 },
       { name: 'Steven', type: 'mixta', unit: 'UNIDAD_2', meta: 15 },
