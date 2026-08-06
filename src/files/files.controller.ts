@@ -29,6 +29,51 @@ export class FilesController {
     return this.serveFile(folder, filename, res);
   }
 
+  // Ruta para documentos específicos de trabajadores
+  @Get('uploads/trabajadores/:id/:docType/:filename')
+  async getWorkerFile(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Param('docType') docType: string,
+    @Param('filename') filename: string,
+    @Res() res: express.Response,
+  ) {
+    await this.validateAccess(req);
+    const filePath = join(process.cwd(), 'uploads', 'trabajadores', id, docType, filename);
+    if (!fs.existsSync(filePath))
+      throw new NotFoundException('Archivo no encontrado');
+
+    const ext = filename.split('.').pop()?.toLowerCase();
+    const mimeTypes: { [key: string]: string } = {
+      pdf: 'application/pdf',
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      webp: 'image/webp',
+      gif: 'image/gif',
+      txt: 'text/plain',
+      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      doc: 'application/msword',
+      xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      xls: 'application/vnd.ms-excel',
+    };
+
+    const contentType = mimeTypes[ext || ''] || 'application/octet-stream';
+    res.setHeader('Content-Type', contentType);
+
+    if (['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext || '')) {
+      res.setHeader('Content-Disposition', 'inline');
+    } else {
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${filename}"`,
+      );
+    }
+
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(res);
+  }
+
   // Compatibilidad con la ruta antigua de previsualización de cotizaciones
   @Get('files/preview/:folder/:filename')
   async previewFile(

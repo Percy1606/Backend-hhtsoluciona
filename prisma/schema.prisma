@@ -451,24 +451,36 @@ model Cotizacion {
 }
 
 model Responsable {
-  id               String         @id @default(uuid())
-  nombre           String
-  area             Area
-  cargo            String
-  email            String?
-  telefono         String?
-  avatar           String?
-  color            String
-  esSubresponsable Boolean?       @default(false)
-  reportesA        String?
-  activo           Boolean?       @default(true)
-  proyectos        Proyecto[]     @relation("ResponsablePrincipal")
-  actividades      Actividad[]    @relation("ActividadResponsablePrincipal")
-  clientes         Cliente[]      @relation("ResponsableClientes")
-  suboperaciones   Suboperacion[]
-  subtareas        Subtarea[]     @relation("SubtareaResponsable")
-  fichasTecnicas   FichaTecnica[]
-  usuario          Usuario?
+  id                         String         @id @default(uuid())
+  nombre                     String
+  area                       Area
+  cargo                      String
+  email                      String?
+  telefono                   String?
+  avatar                     String?
+  color                      String
+  esSubresponsable           Boolean?       @default(false)
+  reportesA                  String?
+  activo                     Boolean?       @default(true)
+  dni                        String?
+  fechaNacimiento            DateTime?
+  sexo                       String?
+  estadoCivil                String?
+  nacionalidad               String?
+  direccion                  String?
+  distrito                   String?
+  ciudad                     String?
+  correoPersonal             String?
+  contactoEmergenciaNombre   String?
+  contactoEmergenciaTelefono String?
+  disponibilidadViajes       Boolean?       @default(false)
+  proyectos                  Proyecto[]     @relation("ResponsablePrincipal")
+  actividades                Actividad[]    @relation("ActividadResponsablePrincipal")
+  clientes                   Cliente[]      @relation("ResponsableClientes")
+  suboperaciones             Suboperacion[]
+  subtareas                  Subtarea[]     @relation("SubtareaResponsable")
+  fichasTecnicas             FichaTecnica[]
+  usuario                    Usuario?
 
   @@map("responsable")
 }
