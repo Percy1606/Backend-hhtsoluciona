@@ -58,6 +58,32 @@ export class AuthService {
     };
   }
 
+  async getProfile(userId: string) {
+    const user = await this.prisma.usuario.findUnique({
+      where: { id: userId },
+      include: { responsable: true },
+    });
+    if (!user || !user.activo) {
+      throw new UnauthorizedException('Usuario inactivo o no encontrado');
+    }
+    const { password, ...result } = user;
+    let modulos = user.modulos;
+    if (typeof modulos === 'string') {
+      try {
+        modulos = JSON.parse(modulos);
+      } catch (e) {
+        modulos = ['dashboard'];
+      }
+    }
+    if (!Array.isArray(modulos)) {
+      modulos = ['dashboard'];
+    }
+    return {
+      ...result,
+      modulos,
+    };
+  }
+
   async verifyAdminPassword(
     password: string,
     userId?: string,
