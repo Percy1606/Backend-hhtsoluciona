@@ -58,8 +58,6 @@ export class WorkersController {
   }
 
   @Get()
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN')
   findAll() {
     return this.configService.findAllWorkers();
   }

@@ -762,10 +762,11 @@ export class CrmService {
           });
         }
       } else {
-        await tx.tareaEstrategica.deleteMany({
-          where: { NOT: { etapaProceso: 'TRABAJADORES' } }
-        });
+        // En la agenda gerencial, solo sincronizamos si el cliente envía un arreglo no vacío
         if (tareas && tareas.length > 0) {
+          await tx.tareaEstrategica.deleteMany({
+            where: { NOT: { etapaProceso: 'TRABAJADORES' } }
+          });
           await tx.tareaEstrategica.createMany({
             data: tareas.map(t => ({
               id: t.id,
