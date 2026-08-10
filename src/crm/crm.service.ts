@@ -723,22 +723,27 @@ export class CrmService {
   // ============================================
   // AGENDA DIARIA
   // ============================================
-  async findAllAgenda() {
+  async findAllAgenda(tipo?: string) {
+    const targetTipo = tipo === 'trabajadores' ? 'TRABAJADORES' : 'GERENCIAL';
     return this.prisma.tareaEstrategica.findMany({
+      where: { etapaProceso: targetTipo },
       orderBy: { createdAt: 'asc' }
     });
   }
 
-  async replaceAgenda(tareas: any[]) {
+  async replaceAgenda(tareas: any[], tipo?: string) {
+    const targetTipo = tipo === 'trabajadores' ? 'TRABAJADORES' : 'GERENCIAL';
     return this.prisma.$transaction(async (tx) => {
-      await tx.tareaEstrategica.deleteMany({});
+      await tx.tareaEstrategica.deleteMany({
+        where: { etapaProceso: targetTipo }
+      });
       if (tareas && tareas.length > 0) {
         await tx.tareaEstrategica.createMany({
           data: tareas.map(t => ({
             id: t.id,
             clienteId: t.clienteId || null,
             empresa: t.empresa,
-            etapaProceso: t.etapaProceso,
+            etapaProceso: targetTipo,
             actividadInmediata: t.actividadInmediata,
             proximoPaso: t.proximoPaso,
             responsable: t.responsable,

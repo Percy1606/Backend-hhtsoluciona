@@ -13,8 +13,9 @@ export class CreateWorkerDto {
   @IsNotEmpty()
   nombre: string;
 
-  @IsEnum(Area)
-  area: Area;
+  @IsString()
+  @IsOptional()
+  area?: Area;
 
   @IsString()
   @IsNotEmpty()

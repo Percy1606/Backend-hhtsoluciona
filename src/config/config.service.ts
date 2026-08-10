@@ -163,7 +163,7 @@ export class ConfigService {
 
   async createWorker(dto: CreateWorkerDto) {
     return this.prisma.responsable.create({
-      data: dto,
+      data: dto as any,
     });
   }
 
@@ -171,7 +171,7 @@ export class ConfigService {
     await this.findOneWorker(id);
     return this.prisma.responsable.update({
       where: { id },
-      data: dto,
+      data: dto as any,
     });
   }
 
