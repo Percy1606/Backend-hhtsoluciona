@@ -724,34 +724,63 @@ export class CrmService {
   // AGENDA DIARIA
   // ============================================
   async findAllAgenda(tipo?: string) {
-    const targetTipo = tipo === 'trabajadores' ? 'TRABAJADORES' : 'GERENCIAL';
-    return this.prisma.tareaEstrategica.findMany({
-      where: { etapaProceso: targetTipo },
-      orderBy: { createdAt: 'asc' }
-    });
+    if (tipo === 'trabajadores') {
+      return this.prisma.tareaEstrategica.findMany({
+        where: { etapaProceso: 'TRABAJADORES' },
+        orderBy: { createdAt: 'asc' }
+      });
+    } else {
+      // Agenda Gerencial: Muestra todas las tareas excepto las exclusivas de trabajadores
+      return this.prisma.tareaEstrategica.findMany({
+        where: { NOT: { etapaProceso: 'TRABAJADORES' } },
+        orderBy: { createdAt: 'asc' }
+      });
+    }
   }
 
   async replaceAgenda(tareas: any[], tipo?: string) {
-    const targetTipo = tipo === 'trabajadores' ? 'TRABAJADORES' : 'GERENCIAL';
+    const isTrabajadores = tipo === 'trabajadores';
     return this.prisma.$transaction(async (tx) => {
-      await tx.tareaEstrategica.deleteMany({
-        where: { etapaProceso: targetTipo }
-      });
-      if (tareas && tareas.length > 0) {
-        await tx.tareaEstrategica.createMany({
-          data: tareas.map(t => ({
-            id: t.id,
-            clienteId: t.clienteId || null,
-            empresa: t.empresa,
-            etapaProceso: targetTipo,
-            actividadInmediata: t.actividadInmediata,
-            proximoPaso: t.proximoPaso,
-            responsable: t.responsable,
-            fechaCompromiso: t.fechaCompromiso,
-            estado: t.estado,
-            subtareas: t.subtareas || []
-          }))
+      if (isTrabajadores) {
+        await tx.tareaEstrategica.deleteMany({
+          where: { etapaProceso: 'TRABAJADORES' }
         });
+        if (tareas && tareas.length > 0) {
+          await tx.tareaEstrategica.createMany({
+            data: tareas.map(t => ({
+              id: t.id,
+              clienteId: t.clienteId || null,
+              empresa: t.empresa,
+              etapaProceso: 'TRABAJADORES',
+              actividadInmediata: t.actividadInmediata,
+              proximoPaso: t.proximoPaso,
+              responsable: t.responsable,
+              fechaCompromiso: t.fechaCompromiso,
+              estado: t.estado,
+              subtareas: t.subtareas || []
+            }))
+          });
+        }
+      } else {
+        await tx.tareaEstrategica.deleteMany({
+          where: { NOT: { etapaProceso: 'TRABAJADORES' } }
+        });
+        if (tareas && tareas.length > 0) {
+          await tx.tareaEstrategica.createMany({
+            data: tareas.map(t => ({
+              id: t.id,
+              clienteId: t.clienteId || null,
+              empresa: t.empresa,
+              etapaProceso: t.etapaProceso || 'GERENCIAL',
+              actividadInmediata: t.actividadInmediata,
+              proximoPaso: t.proximoPaso,
+              responsable: t.responsable,
+              fechaCompromiso: t.fechaCompromiso,
+              estado: t.estado,
+              subtareas: t.subtareas || []
+            }))
+          });
+        }
       }
       return { success: true };
     });
