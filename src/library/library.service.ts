@@ -41,23 +41,33 @@ export class LibraryService implements OnModuleInit {
 
   private async initGoogleDrive() {
     try {
-      const keyPath = path.join(process.cwd(), 'oauth-credentials.json');
-      if (!fs.existsSync(keyPath)) {
-        this.logger.warn(`OAuth credentials not found at ${keyPath}. Uploads will fail.`);
+      // Opcion 1: Variable de entorno con JSON del Service Account (recomendado para produccion)
+      if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+        const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+        const auth = new google.auth.GoogleAuth({
+          credentials,
+          scopes: ['https://www.googleapis.com/auth/drive'],
+        });
+        this.drive = google.drive({ version: 'v3', auth });
+        this.logger.log('Google Drive API initialized with Service Account (env var).');
         return;
       }
 
-      const tokens = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
-      
-      const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-      const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-      const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3005';
+      // Opcion 2: OAuth legacy con oauth-credentials.json (fallback local)
+      const keyPath = path.join(process.cwd(), 'oauth-credentials.json');
+      if (fs.existsSync(keyPath)) {
+        const tokens = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
+        const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+        const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+        const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3005';
+        const oAuth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
+        oAuth2Client.setCredentials(tokens);
+        this.drive = google.drive({ version: 'v3', auth: oAuth2Client });
+        this.logger.log('Google Drive API initialized with OAuth (legacy fallback).');
+        return;
+      }
 
-      const oAuth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
-      oAuth2Client.setCredentials(tokens);
-
-      this.drive = google.drive({ version: 'v3', auth: oAuth2Client });
-      this.logger.log('Google Drive API initialized successfully with OAuth.');
+      this.logger.warn('No Google Drive credentials found. Drive features will be disabled.');
     } catch (error) {
       this.logger.error('Failed to initialize Google Drive API', error);
     }
@@ -83,7 +93,8 @@ export class LibraryService implements OnModuleInit {
 
   async getFolders(): Promise<any[]> {
     if (!this.drive) {
-      throw new HttpException('Google Drive API not initialized', HttpStatus.INTERNAL_SERVER_ERROR);
+      this.logger.warn('Google Drive not initialized. Returning empty folders list.');
+      return [];
     }
     try {
       const res = await this.drive.files.list({
@@ -95,7 +106,7 @@ export class LibraryService implements OnModuleInit {
       return res.data.files || [];
     } catch (error: any) {
       this.logger.error(`Error fetching folders from Drive: ${error.message}`, error.stack);
-      throw new HttpException('Error fetching folders from Drive', HttpStatus.INTERNAL_SERVER_ERROR);
+      return [];
     }
   }
 

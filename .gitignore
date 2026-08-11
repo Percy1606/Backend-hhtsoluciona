@@ -52,8 +52,12 @@ pids
 *.seed
 *.pid.lock
 
- # Google Drive Credentials
-  crm-biblioteca-4fae15a6e89b.json
+# Google Drive Credentials - NEVER commit these files
+crm-biblioteca-4fae15a6e89b.json
+crm-biblioteca-b1422d6a6ad4.json
+service-account.json
+oauth-credentials.json
+*service-account*.json
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
