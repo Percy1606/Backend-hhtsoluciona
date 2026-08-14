@@ -82,6 +82,16 @@ export class CrmController {
     return this.crmService.findAllAgenda(tipo);
   }
 
+  @Get('agenda/general')
+  getAgendaGeneral() {
+    return this.crmService.findAgendaGeneral();
+  }
+
+  @Get('agenda/empresas')
+  getAgendaEmpresas(@Query('tipo') tipo?: string) {
+    return this.crmService.findAgendaAgrupadaPorEmpresa(tipo);
+  }
+
   @Post('agenda')
   saveAgenda(@Body() tareas: any[], @Query('tipo') tipo?: string) {
     return this.crmService.replaceAgenda(tareas, tipo);

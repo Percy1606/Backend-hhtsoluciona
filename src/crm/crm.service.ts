@@ -738,6 +738,58 @@ export class CrmService {
     }
   }
 
+  // Devuelve TODAS las tareas (gerenciales + trabajadores) — para la vista General del jefe
+  async findAgendaGeneral() {
+    return this.prisma.tareaEstrategica.findMany({
+      orderBy: { createdAt: 'asc' }
+    });
+  }
+
+  // Agrupa tareas por empresa con conteos de estado — para la vista "Por Empresa"
+  async findAgendaAgrupadaPorEmpresa(tipo?: string) {
+    const tareas = await this.findAllAgenda(tipo);
+
+    const grupoMap = new Map<string, {
+      empresa: string;
+      total: number;
+      pendiente: number;
+      enProceso: number;
+      finalizada: number;
+      retrasada: number;
+      clienteId: string | null;
+      tareas: typeof tareas;
+    }>();
+
+    for (const t of tareas) {
+      const key = t.empresa;
+      if (!grupoMap.has(key)) {
+        grupoMap.set(key, {
+          empresa: t.empresa,
+          total: 0,
+          pendiente: 0,
+          enProceso: 0,
+          finalizada: 0,
+          retrasada: 0,
+          clienteId: t.clienteId ?? null,
+          tareas: [],
+        });
+      }
+      const grupo = grupoMap.get(key)!;
+      grupo.total++;
+      if (t.estado === 'PENDIENTE') grupo.pendiente++;
+      else if (t.estado === 'EN_PROCESO') grupo.enProceso++;
+      else if (t.estado === 'FINALIZADA') grupo.finalizada++;
+      else if (t.estado === 'RETRASADA') grupo.retrasada++;
+      grupo.tareas.push(t);
+    }
+
+    return Array.from(grupoMap.values()).sort((a, b) => {
+      // Primero las que tienen retrasadas, luego por nombre
+      if (b.retrasada !== a.retrasada) return b.retrasada - a.retrasada;
+      return a.empresa.localeCompare(b.empresa);
+    });
+  }
+
   async replaceAgenda(tareas: any[], tipo?: string) {
     const isTrabajadores = tipo === 'trabajadores';
     return this.prisma.$transaction(async (tx) => {
