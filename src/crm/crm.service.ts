@@ -524,6 +524,21 @@ export class CrmService {
     return interaccion;
   }
 
+  async updateInteraccion(id: string, dto: any) {
+    const dataToUpdate: any = {};
+    if (dto.accion !== undefined) dataToUpdate.accion = dto.accion;
+    if (dto.observaciones !== undefined) dataToUpdate.observaciones = dto.observaciones;
+    if (dto.tipo !== undefined) dataToUpdate.tipo = dto.tipo;
+    if (dto.usuario !== undefined) dataToUpdate.usuario = dto.usuario;
+
+    const interaccion = await this.prisma.interaccion.update({
+      where: { id },
+      data: dataToUpdate,
+    });
+
+    return interaccion;
+  }
+
   async createActividadComercial(dto: any) {
     const actividad = await this.prisma.actividadComercial.create({
       data: {

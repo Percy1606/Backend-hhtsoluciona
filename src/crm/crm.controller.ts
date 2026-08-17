@@ -148,6 +148,13 @@ export class CrmController {
     return this.crmService.createInteraccion(createInteraccionDto);
   }
 
+  @Put('interacciones/:id')
+  @UseGuards(ModulesGuard)
+  @Modules('crm')
+  updateInteraccion(@Param('id') id: string, @Body() dto: any) {
+    return this.crmService.updateInteraccion(id, dto);
+  }
+
   // ============================================
   // ACTIVIDADES COMERCIALES
   // ============================================
