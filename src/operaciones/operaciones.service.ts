@@ -476,88 +476,20 @@ export class OperacionesService {
   ): Promise<PrismaProyecto> {
     const { cotizacionId, ...dto } = createProyectoDto;
 
-    // RESTRICCIÓN: Un cliente solo puede tener UN proyecto operativo activo a la vez.
-    const existingActiveProject = await this.prisma.proyecto.findFirst({
-      where: {
-        clientId: dto.clientId,
-        estado: { not: 'Finalizado' },
-      },
-      include: {
-        cotizacionOrigen: true
-      }
-    });
+    // Si se pasa cotización, verificar que no pertenezca ya a un proyecto activo diferente
+    if (cotizacionId) {
+      const existingProjectWithQuote = await this.prisma.proyecto.findFirst({
+        where: {
+          cotizacionOrigen: { id: cotizacionId },
+          estado: { not: 'Finalizado' },
+        },
+      });
 
-    if (existingActiveProject) {
-      // Si existe un proyecto, verificamos si es una PREVENTA y le estamos intentando inyectar una COTIZACIÓN
-      const isPreventa = !existingActiveProject.cotizacionOrigen && Number(existingActiveProject.ventaContratada) === 0;
-
-      if (isPreventa && cotizacionId) {
-        // ========== LÓGICA DE CONVERSIÓN DE PREVENTA A PROYECTO NORMAL ==========
-        const cotizacion = await this.prisma.cotizacion.findUnique({
-          where: { id: cotizacionId },
-        });
-        if (!cotizacion) throw new BadRequestException('La cotización asociada no existe.');
-
-        // Actualizar el proyecto existente con los montos
-        const defaultBudget = Number(existingActiveProject.costoPresupuestado || 0) === 0 ? Number(cotizacion.monto) * 0.60 : Number(existingActiveProject.costoPresupuestado || 0);
-        const updatedProject = await this.prisma.proyecto.update({
-          where: { id: existingActiveProject.id },
-          data: {
-            ventaContratada: Number(cotizacion.monto),
-            costoPresupuestado: defaultBudget,
-            margenMeta: Number(cotizacion.monto) - defaultBudget,
-            cotizacionOrigen: { connect: { id: cotizacionId } }
-          }
-        });
-
-        // Vincular los documentos de la cotización al proyecto convertido
-        await this.prisma.documento.updateMany({
-          where: { cotizacionId: cotizacionId },
-          data: { proyectoId: updatedProject.id },
-        });
-
-        // Crear los Adelantos automáticos si la cotización tiene hitos COBRADOS
-        const hitosCobrados = await this.prisma.hitoPago.findMany({
-          where: {
-            cotizacionId: cotizacionId,
-            estado: 'COBRADO'
-          }
-        });
-
-        for (const hito of hitosCobrados) {
-          await this.prisma.adelantoProyecto.create({
-            data: {
-              id: uuidv4(),
-              proyectoId: updatedProject.id,
-              monto: Number(hito.monto),
-              fechaRecibido: new Date(),
-              metodo: 'TRANSFERENCIA',
-              referencia: `Hito: ${hito.descripcion}`,
-              saldoDisponible: Number(hito.monto),
-              montoAplicado: 0,
-              observaciones: `Cargado automáticamente desde Cotización ${cotizacion.codigo} (Conversión)`,
-              registradoPorId: user?.id || 'SISTEMA',
-              updatedAt: new Date()
-            }
-          });
-        }
-
-        await this.registrarHistorial(
-          updatedProject.id,
-          null,
-          'PROYECTO_CONVERTIDO',
-          '',
-          `Proyecto de Preventa convertido exitosamente a Proyecto Oficial (Cotización ${cotizacion.codigo})`,
-          user,
+      if (existingProjectWithQuote) {
+        throw new BadRequestException(
+          `La cotización seleccionada ya se encuentra vinculada al proyecto activo "${existingProjectWithQuote.nombre}" (${existingProjectWithQuote.codigo}). Debe utilizar una cotización diferente o registrar el nuevo servicio en Modo Preventa.`
         );
-
-        return updatedProject as any; // Se castea para ignorar el include adicional en el tipo de retorno si lo hubiera
       }
-
-      // throw new BadRequestException({
-      //   error: 'Cliente con Proyecto Activo',
-      //   message: `El cliente ya tiene un proyecto operativo vigente: "${existingActiveProject.nombre}" (${existingActiveProject.codigo}). Debe finalizar el proyecto actual antes de registrar uno nuevo.`,
-      // });
     }
 
     let cotizacion = null;

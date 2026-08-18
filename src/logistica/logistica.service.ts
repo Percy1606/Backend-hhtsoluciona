@@ -965,25 +965,50 @@ export class LogisticaService {
     await this.validarReglasFinancieras(proyectoId, montoTotal);
 
     return this.prisma.$transaction(async (tx) => {
-      const gasto = await tx.gasto.create({
-        data: {
-          codigo: `MO-${proyectoId.slice(0, 4).toUpperCase()}-${Date.now().toString().slice(-4)}`,
+      // Buscar si ya existe una solicitud de mano de obra en estado SOLICITADO para este proyecto
+      const gastoExistente = await tx.gasto.findFirst({
+        where: {
           proyectoId,
-          cajaId: null,
           tipo: TipoGasto.PERSONAL,
-          clasificacion: ClasificacionFinanciera.PROYECTO,
           categoriaDistribucion: CategoriaDistribucion.MANO_OBRA,
-          concepto: `Mano de Obra: ${workers.length} trabajadores - Proyecto`,
-          montoTotal,
-          saldoPendiente: montoTotal,
           estado: EstadoGasto.SOLICITADO,
-          nivelAprobacion: 'PENDIENTE_FINANZAS',
-          solicitanteId: userId,
-          area: 'LogisticaYRecursos',
-          fechaEmision: new Date(),
-          registradoPorId: userId,
-        } as any,
+        },
       });
+
+      let gasto;
+      if (gastoExistente) {
+        // Actualizar el gasto pendiente existente en lugar de duplicar
+        gasto = await tx.gasto.update({
+          where: { id: gastoExistente.id },
+          data: {
+            concepto: `Mano de Obra: ${workers.length} trabajadores - Proyecto`,
+            montoTotal,
+            saldoPendiente: montoTotal,
+            fechaEmision: new Date(),
+          },
+        });
+      } else {
+        // Crear nuevo gasto de mano de obra sólo si no existe uno pendiente
+        gasto = await tx.gasto.create({
+          data: {
+            codigo: `MO-${proyectoId.slice(0, 4).toUpperCase()}-${Date.now().toString().slice(-4)}`,
+            proyectoId,
+            cajaId: null,
+            tipo: TipoGasto.PERSONAL,
+            clasificacion: ClasificacionFinanciera.PROYECTO,
+            categoriaDistribucion: CategoriaDistribucion.MANO_OBRA,
+            concepto: `Mano de Obra: ${workers.length} trabajadores - Proyecto`,
+            montoTotal,
+            saldoPendiente: montoTotal,
+            estado: EstadoGasto.SOLICITADO,
+            nivelAprobacion: 'PENDIENTE_FINANZAS',
+            solicitanteId: userId,
+            area: 'LogisticaYRecursos',
+            fechaEmision: new Date(),
+            registradoPorId: userId,
+          } as any,
+        });
+      }
 
       this.eventEmitter.emit('proyecto.costChanged', {
         proyectoId,
