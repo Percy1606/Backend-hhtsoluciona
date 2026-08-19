@@ -363,4 +363,33 @@ export class LogisticaController {
   async deleteCertificadoEquipo(@Param('id') id: string) {
     return this.logisticaService.deleteCertificadoEquipo(id);
   }
+
+  // ============================================
+  // VEHICULOS
+  // ============================================
+  @Post('vehiculos')
+  async createVehiculo(
+    @Body() data: { placa: string; marcaModelo: string; soatUrl: string; soatVencimiento: string; rtUrl: string; rtVencimiento: string; tpUrl: string },
+    @Req() req: any,
+  ) {
+    return this.logisticaService.createVehiculo(data, req.user.id);
+  }
+
+  @Get('vehiculos')
+  async getVehiculos(@Query('search') search?: string) {
+    return this.logisticaService.getVehiculos(search);
+  }
+
+  @Put('vehiculos/:id')
+  async updateVehiculo(
+    @Param('id') id: string,
+    @Body() data: { placa?: string; marcaModelo?: string; soatUrl?: string; soatVencimiento?: string; rtUrl?: string; rtVencimiento?: string; tpUrl?: string },
+  ) {
+    return this.logisticaService.updateVehiculo(id, data);
+  }
+
+  @Delete('vehiculos/:id')
+  async deleteVehiculo(@Param('id') id: string) {
+    return this.logisticaService.deleteVehiculo(id);
+  }
 }

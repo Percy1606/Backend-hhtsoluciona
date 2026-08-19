@@ -2059,4 +2059,123 @@ export class OperacionesService {
     if (diasRestantes <= 7) return Semaforo.Amarillo;
     return Semaforo.Verde;
   }
+  // ============================================
+  // ACTIVIDADES LIBRES (SIN MIGRACIONES)
+  // ============================================
+
+  async createActividadLibre(
+    data: {
+      titulo: string;
+      descripcion: string;
+      responsableId: string;
+      fechaProgramada: string;
+      tipoActividad?: string;
+      clienteNombre?: string;
+    },
+    user: any,
+  ) {
+    const actividadData = {
+      descripcion: data.descripcion,
+      responsableId: data.responsableId,
+      tipoActividad: data.tipoActividad || 'Otro',
+      clienteNombre: data.clienteNombre || null,
+      estado: 'PENDIENTE',
+      adjuntos: []
+    };
+
+    return this.prisma.documento.create({
+      data: {
+        nombre: data.titulo,
+        tipo: 'Tecnica',
+        subtype: 'ActividadLibre',
+        url: 'NO_APLICA',
+        estado: 'Aprobado',
+        subidoPor: user.id,
+        fechaVencimiento: new Date(data.fechaProgramada),
+        observaciones: JSON.stringify(actividadData),
+        area: 'OperacionesDeCampo',
+      },
+    });
+  }
+
+  async getActividadesLibres(search?: string) {
+    const where: any = {
+      subtype: 'ActividadLibre',
+    };
+    if (search) {
+      where.nombre = { contains: search };
+    }
+    const actividades = await this.prisma.documento.findMany({
+      where,
+      orderBy: { fechaSubida: 'desc' },
+    });
+
+    // Enriquecer con datos del responsable (opcional, pero útil)
+    const responsables = await this.prisma.responsable.findMany();
+    const respMap = new Map(responsables.map(r => [r.id, r]));
+
+    return actividades.map(act => {
+      let data: any = {};
+      try {
+        data = JSON.parse(act.observaciones || '{}');
+      } catch (e) {}
+
+      return {
+        ...act,
+        actividadData: data,
+        responsable: data.responsableId ? respMap.get(data.responsableId) : null
+      };
+    });
+  }
+
+  async updateActividadLibre(
+    id: string,
+    data: {
+      titulo?: string;
+      descripcion?: string;
+      responsableId?: string;
+      fechaProgramada?: string;
+      tipoActividad?: string;
+      clienteNombre?: string;
+      estado?: string;
+      adjuntos?: any[];
+    },
+  ) {
+    const doc = await this.prisma.documento.findFirst({
+      where: { id, subtype: 'ActividadLibre' },
+    });
+    if (!doc) throw new BadRequestException('Actividad no encontrada');
+
+    let currentData: any = {};
+    try {
+      currentData = JSON.parse(doc.observaciones || '{}');
+    } catch (e) {}
+
+    const updateData: any = {};
+    if (data.titulo !== undefined) updateData.nombre = data.titulo;
+    if (data.fechaProgramada !== undefined) updateData.fechaVencimiento = new Date(data.fechaProgramada);
+
+    if (data.descripcion !== undefined) currentData.descripcion = data.descripcion;
+    if (data.responsableId !== undefined) currentData.responsableId = data.responsableId;
+    if (data.tipoActividad !== undefined) currentData.tipoActividad = data.tipoActividad;
+    if (data.clienteNombre !== undefined) currentData.clienteNombre = data.clienteNombre;
+    if (data.estado !== undefined) currentData.estado = data.estado;
+    if (data.adjuntos !== undefined) currentData.adjuntos = data.adjuntos;
+
+    updateData.observaciones = JSON.stringify(currentData);
+
+    return this.prisma.documento.update({
+      where: { id },
+      data: updateData,
+    });
+  }
+
+  async deleteActividadLibre(id: string) {
+    const doc = await this.prisma.documento.findFirst({
+      where: { id, subtype: 'ActividadLibre' },
+    });
+    if (!doc) throw new BadRequestException('Actividad no encontrada');
+    
+    return this.prisma.documento.delete({ where: { id } });
+  }
 }

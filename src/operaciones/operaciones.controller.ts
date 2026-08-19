@@ -470,4 +470,34 @@ export class OperacionesController {
       { proyectoId, tipo, search },
     );
   }
+
+  // ============================================
+  // ACTIVIDADES LIBRES
+  // ============================================
+
+  @Post('actividades-libres')
+  async createActividadLibre(
+    @Body() data: { titulo: string; descripcion: string; responsableId: string; fechaProgramada: string; tipoActividad?: string; clienteNombre?: string },
+    @Req() req: any,
+  ) {
+    return this.operacionesService.createActividadLibre(data, req.user);
+  }
+
+  @Get('actividades-libres')
+  async getActividadesLibres(@Query('search') search?: string) {
+    return this.operacionesService.getActividadesLibres(search);
+  }
+
+  @Put('actividades-libres/:id')
+  async updateActividadLibre(
+    @Param('id') id: string,
+    @Body() data: { titulo?: string; descripcion?: string; responsableId?: string; fechaProgramada?: string; tipoActividad?: string; clienteNombre?: string; estado?: string; adjuntos?: any[] },
+  ) {
+    return this.operacionesService.updateActividadLibre(id, data);
+  }
+
+  @Delete('actividades-libres/:id')
+  async deleteActividadLibre(@Param('id') id: string) {
+    return this.operacionesService.deleteActividadLibre(id);
+  }
 }

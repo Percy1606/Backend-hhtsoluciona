@@ -1181,4 +1181,133 @@ export class LogisticaService {
 
     return this.prisma.documento.delete({ where: { id } });
   }
+  // ============================================
+  // VEHICULOS (SIN MIGRACIONES)
+  // ============================================
+
+  async createVehiculo(
+    data: {
+      placa: string;
+      marcaModelo: string;
+      soatUrl: string;
+      soatVencimiento: string;
+      rtUrl: string;
+      rtVencimiento: string;
+      tpUrl: string;
+    },
+    userId: string,
+  ) {
+    const vSoat = new Date(data.soatVencimiento);
+    const vRt = new Date(data.rtVencimiento);
+    const fechaVencimiento = vSoat < vRt ? vSoat : vRt;
+
+    const vehiculoData = {
+      soat: { url: data.soatUrl, vencimiento: data.soatVencimiento },
+      revisionTecnica: { url: data.rtUrl, vencimiento: data.rtVencimiento },
+      tarjetaPropiedad: { url: data.tpUrl },
+    };
+
+    return this.prisma.documento.create({
+      data: {
+        nombre: data.placa,
+        numero: data.marcaModelo,
+        tipo: TipoDocumento.Tecnica,
+        subtype: 'Vehiculo',
+        url: 'NO_APLICA',
+        estado: EstadoDocumento.Aprobado,
+        subidoPor: userId,
+        fechaVencimiento: fechaVencimiento,
+        observaciones: JSON.stringify(vehiculoData),
+        area: Area.LogisticaYRecursos,
+      },
+    });
+  }
+
+  async getVehiculos(search?: string) {
+    const where: any = {
+      subtype: 'Vehiculo',
+    };
+    if (search) {
+      where.nombre = { contains: search };
+    }
+    return this.prisma.documento.findMany({
+      where,
+      orderBy: { fechaSubida: 'desc' },
+    });
+  }
+
+  async updateVehiculo(
+    id: string,
+    data: {
+      placa?: string;
+      marcaModelo?: string;
+      soatUrl?: string;
+      soatVencimiento?: string;
+      rtUrl?: string;
+      rtVencimiento?: string;
+      tpUrl?: string;
+    },
+  ) {
+    const vehiculoDoc = await this.prisma.documento.findFirst({
+      where: { id, subtype: 'Vehiculo' },
+    });
+    if (!vehiculoDoc) throw new NotFoundException('Vehículo no encontrado');
+
+    const vehiculoData = vehiculoDoc.observaciones ? JSON.parse(vehiculoDoc.observaciones) : {
+      soat: { url: '', vencimiento: '' },
+      revisionTecnica: { url: '', vencimiento: '' },
+      tarjetaPropiedad: { url: '' },
+    };
+
+    const updateData: any = {};
+    if (data.placa !== undefined) updateData.nombre = data.placa;
+    if (data.marcaModelo !== undefined) updateData.numero = data.marcaModelo;
+
+    if (data.soatUrl !== undefined) vehiculoData.soat.url = data.soatUrl;
+    if (data.soatVencimiento !== undefined) vehiculoData.soat.vencimiento = data.soatVencimiento;
+    if (data.rtUrl !== undefined) vehiculoData.revisionTecnica.url = data.rtUrl;
+    if (data.rtVencimiento !== undefined) vehiculoData.revisionTecnica.vencimiento = data.rtVencimiento;
+    if (data.tpUrl !== undefined) vehiculoData.tarjetaPropiedad.url = data.tpUrl;
+
+    const vSoat = new Date(vehiculoData.soat.vencimiento);
+    const vRt = new Date(vehiculoData.revisionTecnica.vencimiento);
+    if (!isNaN(vSoat.getTime()) && !isNaN(vRt.getTime())) {
+      updateData.fechaVencimiento = vSoat < vRt ? vSoat : vRt;
+    } else if (!isNaN(vSoat.getTime())) {
+      updateData.fechaVencimiento = vSoat;
+    } else if (!isNaN(vRt.getTime())) {
+      updateData.fechaVencimiento = vRt;
+    }
+
+    updateData.observaciones = JSON.stringify(vehiculoData);
+
+    return this.prisma.documento.update({
+      where: { id },
+      data: updateData,
+    });
+  }
+
+  async deleteVehiculo(id: string) {
+    const vehiculo = await this.prisma.documento.findFirst({
+      where: { id, subtype: 'Vehiculo' },
+    });
+    if (!vehiculo) throw new NotFoundException('Vehículo no encontrado');
+
+    if (vehiculo.observaciones) {
+      try {
+        const data = JSON.parse(vehiculo.observaciones);
+        const filesToDelete = [];
+        if (data.soat?.url) filesToDelete.push(data.soat.url);
+        if (data.revisionTecnica?.url) filesToDelete.push(data.revisionTecnica.url);
+        if (data.tarjetaPropiedad?.url) filesToDelete.push(data.tarjetaPropiedad.url);
+        
+        if (filesToDelete.length > 0) {
+          await deletePhysicalFiles(filesToDelete);
+        }
+      } catch (e) {
+      }
+    }
+
+    return this.prisma.documento.delete({ where: { id } });
+  }
 }
