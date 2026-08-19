@@ -113,8 +113,8 @@ export class FinanzasService {
     await tx.caja.update({
       where: { id: targetCajaId },
       data: {
-        saldoReal: nuevoReal,
-        saldoDisponible: subMoney(nuevoReal, dbCaja.saldoComprometido),
+        saldoReal: { increment: monto },
+        saldoDisponible: { increment: monto },
       },
     });
 
@@ -189,8 +189,8 @@ export class FinanzasService {
     await tx.caja.update({
       where: { id: cajaOrigen.id },
       data: {
-        saldoReal: nuevoRealOrigen,
-        saldoDisponible: subMoney(nuevoRealOrigen, cajaOrigen.saldoComprometido),
+        saldoReal: { decrement: montoAhorro },
+        saldoDisponible: { decrement: montoAhorro },
       },
     });
 
@@ -199,8 +199,8 @@ export class FinanzasService {
     await tx.caja.update({
       where: { id: cajaDestino.id },
       data: {
-        saldoReal: nuevoRealDestino,
-        saldoDisponible: subMoney(nuevoRealDestino, cajaDestino.saldoComprometido),
+        saldoReal: { increment: montoAhorro },
+        saldoDisponible: { increment: montoAhorro },
       },
     });
 
@@ -313,8 +313,8 @@ export class FinanzasService {
     await tx.caja.update({
       where: { id: cajaId },
       data: {
-        saldoReal: nuevoReal,
-        saldoDisponible: nuevoReal - Number(dbCaja.saldoComprometido),
+        saldoReal: { increment: monto },
+        saldoDisponible: { increment: monto },
       },
     });
 
@@ -365,8 +365,8 @@ export class FinanzasService {
     await tx.caja.update({
       where: { id: cajaId },
       data: {
-        saldoReal: nuevoReal,
-        saldoDisponible: nuevoReal - Number(dbCaja.saldoComprometido),
+        saldoReal: { decrement: monto },
+        saldoDisponible: { decrement: monto },
       },
     });
 
@@ -705,12 +705,12 @@ export class FinanzasService {
       for (const pago of pagosFactura) {
         const dbCaja = await tx.caja.findUnique({ where: { id: pago.cajaId } });
         if (dbCaja) {
-          const nuevoReal = Number(dbCaja.saldoReal) - Number(pago.monto);
+          const montoReversion = Number(pago.monto);
           await tx.caja.update({
             where: { id: pago.cajaId },
             data: {
-              saldoReal: nuevoReal,
-              saldoDisponible: nuevoReal - Number(dbCaja.saldoComprometido),
+              saldoReal: { decrement: montoReversion },
+              saldoDisponible: { decrement: montoReversion },
             },
           });
         }
@@ -824,12 +824,13 @@ export class FinanzasService {
 
       // Registrar ingreso en la caja seleccionada
       if (dbCaja) {
-        const nuevoReal = addMoney(dbCaja.saldoReal, pago.monto);
+        const montoIngreso = Number(pago.monto);
+        const nuevoReal = addMoney(dbCaja.saldoReal, montoIngreso);
         await tx.caja.update({
           where: { id: targetCajaId },
           data: {
-            saldoReal: nuevoReal,
-            saldoDisponible: subMoney(nuevoReal, dbCaja.saldoComprometido),
+            saldoReal: { increment: montoIngreso },
+            saldoDisponible: { increment: montoIngreso },
           },
         });
         await tx.transaccionCaja.create({
@@ -919,13 +920,13 @@ export class FinanzasService {
       
       if (isGeneralExpense) {
         preferredCaja = await this.prisma.caja.findFirst({
-          where: { nombre: { contains: 'General' } }
+          where: { esPrincipal: true, moneda: 'PEN' }
         });
       }
       
       if (!preferredCaja) {
         preferredCaja = await this.prisma.caja.findFirst({
-          where: { OR: [{ nombre: { contains: 'Principal' } }, { moneda: 'PEN' }] }
+          where: { OR: [{ esPrincipal: true }, { moneda: 'PEN' }] }
         });
       }
       targetCajaId = preferredCaja?.id;
@@ -1209,12 +1210,12 @@ export class FinanzasService {
       for (const pago of gasto.pagos) {
         const dbCaja = await tx.caja.findUnique({ where: { id: pago.cajaId } });
         if (dbCaja) {
-          const nuevoReal = addMoney(dbCaja.saldoReal, pago.monto); // Es un gasto, sumamos al revertir
+          const montoReversion = Number(pago.monto);
           await tx.caja.update({
             where: { id: pago.cajaId },
             data: {
-              saldoReal: nuevoReal,
-              saldoDisponible: subMoney(nuevoReal, dbCaja.saldoComprometido),
+              saldoReal: { increment: montoReversion },
+              saldoDisponible: { increment: montoReversion },
             },
           });
           totalRevertido = addMoney(totalRevertido, pago.monto);
@@ -1225,12 +1226,12 @@ export class FinanzasService {
       if (gasto.estado === 'PAGADO' && totalRevertido === 0 && gasto.cajaId) {
         const dbCaja = await tx.caja.findUnique({ where: { id: gasto.cajaId } });
         if (dbCaja) {
-          const nuevoReal = addMoney(dbCaja.saldoReal, gasto.montoTotal);
+          const montoReversion = Number(gasto.montoTotal);
           await tx.caja.update({
             where: { id: gasto.cajaId },
             data: {
-              saldoReal: nuevoReal,
-              saldoDisponible: subMoney(nuevoReal, dbCaja.saldoComprometido),
+              saldoReal: { increment: montoReversion },
+              saldoDisponible: { increment: montoReversion },
             },
           });
         }
@@ -1417,15 +1418,16 @@ export class FinanzasService {
         const esGasto = Boolean(pago.gastoId);
         // Si borramos un pago de GASTO (era egreso), devolvemos el dinero (+)
         // Si borramos un pago de FACTURA (era ingreso), descontamos el dinero (-)
+        const montoReversion = Number(pago.monto);
         const nuevoReal = esGasto
-          ? Number(dbCaja.saldoReal) + Number(pago.monto)
-          : Number(dbCaja.saldoReal) - Number(pago.monto);
+          ? Number(dbCaja.saldoReal) + montoReversion
+          : Number(dbCaja.saldoReal) - montoReversion;
 
         await tx.caja.update({
           where: { id: pago.cajaId },
           data: {
-            saldoReal: nuevoReal,
-            saldoDisponible: nuevoReal - Number(dbCaja.saldoComprometido),
+            saldoReal: esGasto ? { increment: montoReversion } : { decrement: montoReversion },
+            saldoDisponible: esGasto ? { increment: montoReversion } : { decrement: montoReversion },
           },
         });
 
@@ -1659,8 +1661,8 @@ export class FinanzasService {
       await tx.caja.update({
         where: { id: origenId },
         data: {
-          saldoReal: nuevoRealOrigen,
-          saldoDisponible: subMoney(nuevoRealOrigen, origen.saldoComprometido),
+          saldoReal: { decrement: montoNum },
+          saldoDisponible: { decrement: montoNum },
         },
       });
 
@@ -1669,8 +1671,8 @@ export class FinanzasService {
       await tx.caja.update({
         where: { id: destinoId },
         data: {
-          saldoReal: nuevoRealDestino,
-          saldoDisponible: subMoney(nuevoRealDestino, destino.saldoComprometido),
+          saldoReal: { increment: montoNum },
+          saldoDisponible: { increment: montoNum },
         },
       });
 
@@ -2129,8 +2131,8 @@ export class FinanzasService {
       await tx.caja.update({
         where: { id: targetCajaId },
         data: {
-          saldoComprometido: nuevoComprometido,
-          saldoDisponible: Number(dbCaja.saldoReal) - nuevoComprometido,
+          saldoComprometido: { increment: monto },
+          saldoDisponible: { decrement: monto },
         },
       });
       await tx.transaccionCaja.create({
@@ -2169,15 +2171,17 @@ export class FinanzasService {
     const execute = async (tx: any) => {
       const dbCaja = await tx.caja.findUnique({ where: { id: targetCajaId } });
       if (!dbCaja) return;
+      const actualComprometido = Number(dbCaja.saldoComprometido);
+      const montoLiberar = Math.min(monto, actualComprometido);
       const nuevoComprometido = Math.max(
         0,
-        Number(dbCaja.saldoComprometido) - monto,
+        actualComprometido - monto,
       );
       await tx.caja.update({
         where: { id: targetCajaId },
         data: {
-          saldoComprometido: nuevoComprometido,
-          saldoDisponible: Number(dbCaja.saldoReal) - nuevoComprometido,
+          saldoComprometido: { decrement: montoLiberar },
+          saldoDisponible: { increment: montoLiberar },
         },
       });
       await tx.transaccionCaja.create({
@@ -2255,14 +2259,15 @@ export class FinanzasService {
 
       const nuevoReal = Number(dbCaja.saldoReal) - monto;
       let nuevoComprometido = Number(dbCaja.saldoComprometido);
+      const montoDescomprometer = wasCommitted ? Math.min(monto, nuevoComprometido) : 0;
       if (wasCommitted)
         nuevoComprometido = Math.max(0, nuevoComprometido - monto);
       await tx.caja.update({
         where: { id: targetCajaId },
         data: {
-          saldoReal: nuevoReal,
-          saldoComprometido: nuevoComprometido,
-          saldoDisponible: nuevoReal - nuevoComprometido,
+          saldoReal: { decrement: monto },
+          ...(wasCommitted ? { saldoComprometido: { decrement: montoDescomprometer } } : {}),
+          saldoDisponible: wasCommitted ? { increment: montoDescomprometer - monto } : { decrement: monto },
         },
       });
       await tx.transaccionCaja.create({
@@ -2332,13 +2337,14 @@ export class FinanzasService {
           where: { id: targetCajaId },
         });
         if (dbCaja) {
+          const montoAdelanto = Number(adelantoData.monto);
           const nuevoReal =
-            Number(dbCaja.saldoReal) + Number(adelantoData.monto);
+            Number(dbCaja.saldoReal) + montoAdelanto;
           await tx.caja.update({
             where: { id: targetCajaId },
             data: {
-              saldoReal: nuevoReal,
-              saldoDisponible: nuevoReal - Number(dbCaja.saldoComprometido),
+              saldoReal: { increment: montoAdelanto },
+              saldoDisponible: { increment: montoAdelanto },
             },
           });
           await tx.transaccionCaja.create({

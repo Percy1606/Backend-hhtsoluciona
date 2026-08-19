@@ -7,6 +7,7 @@ import {
   IsEnum,
   IsUUID,
   IsBoolean,
+  Min,
 } from 'class-validator';
 import { EstadoFactura, ClasificacionFinanciera } from '@prisma/client';
 
@@ -32,14 +33,17 @@ export class CreateFacturaDto {
   clasificacion?: ClasificacionFinanciera;
 
   @IsNumber()
+  @Min(0.01, { message: 'El subtotal debe ser mayor a cero' })
   @IsNotEmpty()
   montoSubtotal: number;
 
   @IsNumber()
+  @Min(0, { message: 'El IGV no puede ser negativo' })
   @IsNotEmpty()
   montoIgv: number;
 
   @IsNumber()
+  @Min(0.01, { message: 'El monto total debe ser mayor a cero' })
   @IsNotEmpty()
   montoTotal: number;
 

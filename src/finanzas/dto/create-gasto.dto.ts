@@ -7,6 +7,7 @@ import {
   IsEnum,
   IsDateString,
   IsBoolean,
+  Min,
 } from 'class-validator';
 import {
   EstadoGasto,
@@ -64,6 +65,7 @@ export class CreateGastoDto {
   area?: Area;
 
   @IsNumber()
+  @Min(0.01, { message: 'El monto debe ser mayor a cero' })
   @IsNotEmpty()
   montoTotal: number;
 

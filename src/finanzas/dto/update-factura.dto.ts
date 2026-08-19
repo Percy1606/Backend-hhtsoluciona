@@ -6,6 +6,7 @@ import {
   IsEnum,
   IsUUID,
   IsBoolean,
+  Min,
 } from 'class-validator';
 import { EstadoFactura, ClasificacionFinanciera } from '@prisma/client';
 
@@ -39,6 +40,7 @@ export class UpdateFacturaDto {
   montoIgv?: number;
 
   @IsNumber()
+  @Min(0.01, { message: 'El monto total debe ser mayor a cero' })
   @IsOptional()
   montoTotal?: number;
 

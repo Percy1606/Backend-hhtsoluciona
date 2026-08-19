@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsString,
   IsDateString,
+  Min,
 } from 'class-validator';
 import { MetodoPago } from '@prisma/client';
 
@@ -15,6 +16,7 @@ export class CreatePagoDto {
   facturaId: string;
 
   @IsNumber()
+  @Min(0.01, { message: 'El monto del pago debe ser mayor a cero' })
   @IsNotEmpty()
   monto: number;
 

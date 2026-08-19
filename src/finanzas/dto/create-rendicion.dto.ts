@@ -5,6 +5,7 @@ import {
   IsNotEmpty,
   IsUUID,
   IsDateString,
+  Min,
 } from 'class-validator';
 
 export class CreateRendicionDto {
@@ -13,6 +14,7 @@ export class CreateRendicionDto {
   gastoId: string;
 
   @IsNumber()
+  @Min(0.01, { message: 'El monto debe ser mayor a cero' })
   @IsNotEmpty()
   monto: number;
 
