@@ -41,7 +41,7 @@ export class CrmService {
       ];
     }
 
-    if (filters.tarifa) where.tarifa = filters.tarifa;
+    if (filters.tarifa && filters.tarifa !== 'todas') where.tarifa = filters.tarifa;
     if (filters.zona) where.zona = filters.zona;
     if (filters.asignadoA) {
       if (filters.asignadoA.toLowerCase() === 'angi') {
@@ -59,8 +59,24 @@ export class CrmService {
       }
     }
     if (filters.clasificacion) where.clasificacion = filters.clasificacion;
+    if (filters.tipoCliente) where.tipoCliente = filters.tipoCliente;
     if (filters.estado) where.estado = filters.estado;
-    if (filters.etapaComercial) where.etapaComercial = filters.etapaComercial;
+    if (filters.etapaComercial && filters.etapaComercial !== 'todas') {
+      if (filters.etapaComercial === 'Orden de Servicio') {
+        where.AND = [
+          ...(where.AND || []),
+          {
+            OR: [
+              { etapaComercial: 'Orden de Servicio' },
+              { etapaComercial: 'Ganado' },
+              { etapaComercial: 'Ganado / Fidelizado' }
+            ]
+          }
+        ];
+      } else {
+        where.etapaComercial = filters.etapaComercial;
+      }
+    }
     
     // FILTRO POR FECHA DE CREACIÓN (PROSPECTANDO POR DÍA)
     if (filters.startDate || filters.endDate) {
