@@ -62,20 +62,29 @@ export class CrmService {
     if (filters.tipoCliente) where.tipoCliente = filters.tipoCliente;
     if (filters.estado) where.estado = filters.estado;
     if (filters.etapaComercial && filters.etapaComercial !== 'todas') {
-      if (filters.etapaComercial === 'Orden de Servicio') {
-        where.AND = [
-          ...(where.AND || []),
-          {
-            OR: [
-              { etapaComercial: 'Orden de Servicio' },
-              { etapaComercial: 'Ganado' },
-              { etapaComercial: 'Ganado / Fidelizado' }
-            ]
-          }
-        ];
-      } else {
-        where.etapaComercial = filters.etapaComercial;
+      const etapa = filters.etapaComercial;
+      let possibleStages = [etapa];
+
+      if (etapa === 'Prospecto' || etapa === 'Contacto Inicial') {
+        possibleStages = ['Prospecto', 'Contacto Inicial', 'Contactado', 'Llamada Realizada', 'PROSPECTO'];
+      } else if (etapa === 'Visita Técnica') {
+        possibleStages = ['Visita Técnica', 'Visita Agendada', 'Inspección Realizada', 'VISITA_TECNICA'];
+      } else if (etapa === 'Visita Comercial') {
+        possibleStages = ['Visita Comercial', 'VISITA_COMERCIAL'];
+      } else if (etapa === 'Cotización') {
+        possibleStages = ['Cotización', 'Cotización Enviada', 'Seguimiento', 'COTIZACION'];
+      } else if (etapa === 'Negociación') {
+        possibleStages = ['Negociación', 'NEGOCIACION'];
+      } else if (etapa === 'Orden de Servicio') {
+        possibleStages = ['Orden de Servicio', 'Ganado', 'Ganado / Fidelizado', 'Servicio Ejecutado', 'Facturación', 'Postventa', 'GANADO', 'ORDEN_DE_SERVICIO'];
       }
+
+      where.AND = [
+        ...(where.AND || []),
+        {
+          OR: possibleStages.map(s => ({ etapaComercial: s }))
+        }
+      ];
     }
     
     // FILTRO POR FECHA DE CREACIÓN (PROSPECTANDO POR DÍA)
