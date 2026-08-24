@@ -46,6 +46,8 @@ export class CrmController {
     @Query('asignadoA') asignadoA?: string,
     @Query('clasificacion') clasificacion?: string,
     @Query('estado') estado?: string,
+    @Query('etapaComercial') etapaComercial?: string,
+    @Query('tipoCliente') tipoCliente?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
@@ -59,6 +61,8 @@ export class CrmController {
         asignadoA,
         clasificacion,
         estado,
+        etapaComercial,
+        tipoCliente,
         startDate,
         endDate,
       },
