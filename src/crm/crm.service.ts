@@ -43,7 +43,21 @@ export class CrmService {
 
     if (filters.tarifa) where.tarifa = filters.tarifa;
     if (filters.zona) where.zona = filters.zona;
-    if (filters.asignadoA) where.asignadoA = filters.asignadoA;
+    if (filters.asignadoA) {
+      if (filters.asignadoA.toLowerCase() === 'angi') {
+        where.AND = [
+          ...(where.AND || []),
+          {
+            OR: [
+              { asignadoA: 'Angi' },
+              { asignadoA: 'Angie' }
+            ]
+          }
+        ];
+      } else {
+        where.asignadoA = filters.asignadoA;
+      }
+    }
     if (filters.clasificacion) where.clasificacion = filters.clasificacion;
     if (filters.estado) where.estado = filters.estado;
     if (filters.etapaComercial) where.etapaComercial = filters.etapaComercial;
@@ -303,6 +317,9 @@ export class CrmService {
       } = dto;
 
       const data: any = { ...rest };
+      if (data.asignadoA && data.asignadoA.toLowerCase() === 'angie') {
+        data.asignadoA = 'Angi';
+      }
 
       const normalizeEnum = (val: string) => {
         if (!val) return undefined;
