@@ -45,15 +45,7 @@ export class CrmService {
     if (filters.zona) where.zona = filters.zona;
     if (filters.asignadoA) {
       if (filters.asignadoA.toLowerCase() === 'angi') {
-        where.AND = [
-          ...(where.AND || []),
-          {
-            OR: [
-              { asignadoA: 'Angi' },
-              { asignadoA: 'Angie' }
-            ]
-          }
-        ];
+        where.asignadoA = { in: ['Angi', 'Angie', 'angi', 'angie', 'ANGI', 'ANGIE'] };
       } else {
         where.asignadoA = filters.asignadoA;
       }
@@ -63,28 +55,53 @@ export class CrmService {
     if (filters.estado) where.estado = filters.estado;
     if (filters.etapaComercial && filters.etapaComercial !== 'todas') {
       const etapa = filters.etapaComercial;
-      let possibleStages = [etapa];
+      let possibleStages: string[] = [etapa];
 
       if (etapa === 'Prospecto' || etapa === 'Contacto Inicial') {
-        possibleStages = ['Prospecto', 'Contacto Inicial', 'Contactado', 'Llamada Realizada', 'PROSPECTO'];
+        possibleStages = [
+          'Prospecto', 'prospecto', 'PROSPECTO',
+          'Contacto Inicial', 'contacto inicial', 'CONTACTO INICIAL',
+          'Contactado', 'contactado', 'CONTACTADO',
+          'Llamada Realizada', 'llamada realizada', 'LLAMADA REALIZADA'
+        ];
       } else if (etapa === 'Visita Técnica') {
-        possibleStages = ['Visita Técnica', 'Visita Agendada', 'Inspección Realizada', 'VISITA_TECNICA'];
+        possibleStages = [
+          'Visita Técnica', 'Visita Tecnica', 'visita técnica', 'visita tecnica', 'VISITA TÉCNICA', 'VISITA TECNICA', 'VISITA_TECNICA',
+          'Visita Agendada', 'visita agendada', 'VISITA AGENDADA',
+          'Inspección Realizada', 'Inspeccion Realizada', 'inspección realizada', 'inspeccion realizada', 'INSPECCIÓN REALIZADA', 'INSPECCION REALIZADA'
+        ];
       } else if (etapa === 'Visita Comercial') {
-        possibleStages = ['Visita Comercial', 'VISITA_COMERCIAL'];
+        possibleStages = [
+          'Visita Comercial', 'visita comercial', 'VISITA COMERCIAL', 'VISITA_COMERCIAL'
+        ];
       } else if (etapa === 'Cotización') {
-        possibleStages = ['Cotización', 'Cotización Enviada', 'Seguimiento', 'COTIZACION'];
+        possibleStages = [
+          'Cotización', 'Cotizacion', 'cotización', 'cotizacion', 'COTIZACIÓN', 'COTIZACION',
+          'Cotización Enviada', 'Cotizacion Enviada', 'cotización enviada', 'cotizacion enviada', 'COTIZACIÓN ENVIADA', 'COTIZACION ENVIADA',
+          'Seguimiento', 'seguimiento', 'SEGUIMIENTO'
+        ];
       } else if (etapa === 'Negociación') {
-        possibleStages = ['Negociación', 'NEGOCIACION'];
+        possibleStages = [
+          'Negociación', 'Negociacion', 'negociación', 'negociacion', 'NEGOCIACIÓN', 'NEGOCIACION'
+        ];
       } else if (etapa === 'Orden de Servicio') {
-        possibleStages = ['Orden de Servicio', 'Ganado', 'Ganado / Fidelizado', 'Servicio Ejecutado', 'Facturación', 'Postventa', 'GANADO', 'ORDEN_DE_SERVICIO'];
+        possibleStages = [
+          'Orden de Servicio', 'orden de servicio', 'ORDEN DE SERVICIO', 'ORDEN_DE_SERVICIO',
+          'Ganado', 'ganado', 'GANADO',
+          'Ganado / Fidelizado', 'ganado / fidelizado', 'GANADO / FIDELIZADO',
+          'Servicio Ejecutado', 'servicio ejecutado', 'SERVICIO EJECUTADO',
+          'Facturación', 'Facturacion', 'facturación', 'facturacion', 'FACTURACIÓN', 'FACTURACION',
+          'Postventa', 'postventa', 'POSTVENTA'
+        ];
+      } else if (etapa === 'Servicio Ejecutado') {
+        possibleStages = ['Servicio Ejecutado', 'servicio ejecutado', 'SERVICIO EJECUTADO'];
+      } else if (etapa === 'Facturación') {
+        possibleStages = ['Facturación', 'Facturacion', 'facturación', 'facturacion', 'FACTURACIÓN', 'FACTURACION'];
+      } else if (etapa === 'Postventa') {
+        possibleStages = ['Postventa', 'postventa', 'POSTVENTA'];
       }
 
-      where.AND = [
-        ...(where.AND || []),
-        {
-          OR: possibleStages.map(s => ({ etapaComercial: s }))
-        }
-      ];
+      where.etapaComercial = { in: possibleStages };
     }
     
     // FILTRO POR FECHA DE CREACIÓN (PROSPECTANDO POR DÍA)
