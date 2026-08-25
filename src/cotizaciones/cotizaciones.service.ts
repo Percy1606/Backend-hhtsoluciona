@@ -371,13 +371,29 @@ export class CotizacionesService {
       }
 
       // 1. Buscar si existe un proyecto de preventa activo para este cliente (ventaContratada === 0)
-      const existingPreventa = await this.prisma.proyecto.findFirst({
-        where: {
-          clientId: cotizacion.clientId,
-          estado: { not: 'Finalizado' },
-          ventaContratada: 0,
-        },
-      });
+      // Si el cliente tiene varias preventas, buscar primero la que coincida en referencia/nombre
+      let existingPreventa = null;
+      if (cotizacion.referencia) {
+        existingPreventa = await this.prisma.proyecto.findFirst({
+          where: {
+            clientId: cotizacion.clientId,
+            estado: { not: 'Finalizado' },
+            ventaContratada: 0,
+            nombre: { contains: cotizacion.referencia.trim() },
+          },
+        });
+      }
+
+      if (!existingPreventa) {
+        existingPreventa = await this.prisma.proyecto.findFirst({
+          where: {
+            clientId: cotizacion.clientId,
+            estado: { not: 'Finalizado' },
+            ventaContratada: 0,
+          },
+          orderBy: { fechaCreacion: 'desc' },
+        });
+      }
 
       const osCode = await this.generateOsCodigo();
       const hoy = new Date();

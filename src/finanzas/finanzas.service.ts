@@ -3007,8 +3007,17 @@ export class FinanzasService {
   // ============================================
 
   async getProyectosPendientesFinanzas(todas: boolean = false) {
+    const where: any = {};
+    if (!todas) {
+      // Por defecto en Finanzas solo mostrar proyectos oficiales con venta contratada > 0 o con cotización asociada
+      where.OR = [
+        { ventaContratada: { gt: 0 } },
+        { cotizacionOrigen: { isNot: null } },
+      ];
+    }
+
     const proyectos = await this.prisma.proyecto.findMany({
-      where: {},
+      where,
       select: {
         id: true,
         codigo: true,
