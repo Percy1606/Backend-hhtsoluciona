@@ -1,0 +1,58 @@
+{
+  "modulos": [
+    {
+      "id": "comercial",
+      "nombre": "CRM y Ventas",
+      "descripcion": "Gestión de clientes, cotizaciones y oportunidades",
+      "icono": "Users"
+    },
+    {
+      "id": "operaciones",
+      "nombre": "Operaciones y Proyectos",
+      "descripcion": "Planificación, tareas, cronograma y validaciones",
+      "icono": "Briefcase"
+    },
+    {
+      "id": "logistica",
+      "nombre": "Logística y Almacén",
+      "descripcion": "Inventario, insumos, órdenes de compra y kardex",
+      "icono": "Truck"
+    },
+    {
+      "id": "finanzas",
+      "nombre": "Finanzas e Ingresos",
+      "descripcion": "Caja chica, gastos, facturación y cobranzas",
+      "icono": "BarChart3"
+    },
+    {
+      "id": "configuracion",
+      "nombre": "Configuración y Usuarios",
+      "descripcion": "Gestión de accesos, trabajadores y parámetros",
+      "icono": "Settings"
+    }
+  ],
+  "videos": [
+    {
+      "id": "vid_1787666545497_tbip7z",
+      "titulo": "BASE DE DATOS CLIENTE",
+      "descripcion": "BASE DE DATOS PARA ADMINISTRACION DE CLIENTES",
+      "moduloId": "comercial",
+      "driveUrl": "https://drive.google.com/file/d/1CwrytfpUolelhd3ja9pUqb2FNnyS2gIt/view?usp=drive_link",
+      "driveEmbedUrl": "https://drive.google.com/file/d/1CwrytfpUolelhd3ja9pUqb2FNnyS2gIt/preview",
+      "duracion": "2:04",
+      "orden": 1,
+      "fechaCreacion": "2026-08-25T14:02:25.498Z"
+    },
+    {
+      "id": "vid_1787666682091_autrfl",
+      "titulo": "PROCESO DE VENTAS",
+      "descripcion": "PROCESO DE VENTAS",
+      "moduloId": "comercial",
+      "driveUrl": "https://drive.google.com/file/d/1h8dZ5o9SX7or4hd3Hw_rm5miH1Y-ccFp/view?usp=drive_link",
+      "driveEmbedUrl": "https://drive.google.com/file/d/1h8dZ5o9SX7or4hd3Hw_rm5miH1Y-ccFp/preview",
+      "duracion": "",
+      "orden": 2,
+      "fechaCreacion": "2026-08-25T14:04:42.091Z"
+    }
+  ]
+}
