@@ -122,8 +122,6 @@ export class ManualesController {
   }
 
   @Post('video')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN')
   createVideo(
     @Body() body: { titulo: string; descripcion?: string; moduloId: string; driveUrl: string; duracion?: string },
   ) {
@@ -152,8 +150,6 @@ export class ManualesController {
   }
 
   @Put('video/:id')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN')
   updateVideo(
     @Param('id') id: string,
     @Body() body: { titulo?: string; descripcion?: string; moduloId?: string; driveUrl?: string; duracion?: string; orden?: number },
@@ -183,8 +179,6 @@ export class ManualesController {
   }
 
   @Delete('video/:id')
-  @UseGuards(RolesGuard)
-  @Roles('ADMIN')
   deleteVideo(@Param('id') id: string) {
     const data = this.readData();
     const initialCount = data.videos.length;
