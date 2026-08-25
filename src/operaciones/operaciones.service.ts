@@ -476,18 +476,26 @@ export class OperacionesService {
   ): Promise<PrismaProyecto> {
     const { cotizacionId, ...dto } = createProyectoDto;
 
-    // Si se pasa cotización, verificar que no pertenezca ya a un proyecto activo diferente
+    // Si se pasa cotización, verificar que no pertenezca ya a un proyecto activo diferente o tenga una O.S. con proyecto
     if (cotizacionId) {
       const existingProjectWithQuote = await this.prisma.proyecto.findFirst({
         where: {
-          cotizacionOrigen: { id: cotizacionId },
+          OR: [
+            { cotizacionOrigen: { id: cotizacionId } },
+            { ordenesDeServicio: { some: { cotizacionId: cotizacionId } } },
+          ],
           estado: { not: 'Finalizado' },
+        },
+        include: {
+          ordenesDeServicio: true,
         },
       });
 
       if (existingProjectWithQuote) {
+        const osCode = existingProjectWithQuote.ordenesDeServicio?.[0]?.codigo;
+        const ident = osCode ? `la Orden de Servicio ${osCode}` : `el proyecto "${existingProjectWithQuote.nombre}" (${existingProjectWithQuote.codigo})`;
         throw new BadRequestException(
-          `La cotización seleccionada ya se encuentra vinculada al proyecto activo "${existingProjectWithQuote.nombre}" (${existingProjectWithQuote.codigo}). Debe utilizar una cotización diferente o registrar el nuevo servicio en Modo Preventa.`
+          `La Orden de Servicio / Cotización ya tiene un proyecto asignado (${ident}). No es necesario crearlo nuevamente.`
         );
       }
     }
