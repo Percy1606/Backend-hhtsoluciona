@@ -1293,7 +1293,17 @@ export class OperacionesService {
       this.prisma.actividad.findMany({
         where,
         include: {
-          proyecto: { select: { codigo: true, nombre: true } },
+          proyecto: {
+            select: {
+              id: true,
+              codigo: true,
+              nombre: true,
+              clientId: true,
+              cliente: {
+                select: { id: true, empresa: true, codigo: true, ruc: true }
+              }
+            }
+          },
           responsablePrincipal: true,
           subtareas: true,
           validacionesRequeridas: true,
