@@ -2273,12 +2273,16 @@ export class FinanzasService {
         }
       }
 
-      // VALIDACIÓN DE CAJA
-      if (!wasCommitted && monto > Number(dbCaja.saldoDisponible)) {
-        throw new BadRequestException(`Operación denegada: La caja ${dbCaja.nombre} solo tiene S/ ${Number(dbCaja.saldoDisponible).toFixed(2)} disponible. Liquidez insuficiente.`);
-      }
-      if (monto > Number(dbCaja.saldoReal)) {
-        throw new BadRequestException(`Operación denegada: La caja ${dbCaja.nombre} no tiene saldo real suficiente para este retiro.`);
+      // VALIDACIÓN DE CAJA (Se permite sobregiro en Cajas Chicas / Operativas de campo para registrar préstamos personales)
+      const esCajaChicaOperativa = dbCaja.subtipo === 'OPERATIVA' || dbCaja.tipo === 'EFECTIVO' || dbCaja.nombre.toLowerCase().includes('chica');
+      
+      if (!esCajaChicaOperativa) {
+        if (!wasCommitted && monto > Number(dbCaja.saldoDisponible)) {
+          throw new BadRequestException(`Operación denegada: La cuenta ${dbCaja.nombre} solo tiene S/ ${Number(dbCaja.saldoDisponible).toFixed(2)} disponible. Liquidez insuficiente.`);
+        }
+        if (monto > Number(dbCaja.saldoReal)) {
+          throw new BadRequestException(`Operación denegada: La cuenta ${dbCaja.nombre} no tiene saldo real suficiente para este retiro.`);
+        }
       }
 
       const nuevoReal = Number(dbCaja.saldoReal) - monto;
