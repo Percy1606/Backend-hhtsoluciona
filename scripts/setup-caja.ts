@@ -1,5 +1,12 @@
 import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
+import { PrismaMariaDb } from '@prisma/adapter-mariadb';
+import * as dotenv from 'dotenv';
+import * as path from 'path';
+
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+const databaseUrl = process.env.DATABASE_URL || 'mysql://hh_user:HHT2026Segura@localhost:3306/software_hh_db?allowPublicKeyRetrieval=true';
+const adapter = new PrismaMariaDb(databaseUrl);
+const prisma = new PrismaClient({ adapter });
 
 async function main() {
   console.log('=== INICIANDO ASENTAMIENTO DE CAJA CHICA - STEVEN (AGOSTO 2026) ===');

@@ -1896,8 +1896,32 @@ export class FinanzasService {
       this.prisma.transaccionCaja.count({ where: { cajaId } }),
     ]);
 
+    // Enriquecer con datos del gasto si tiene referenciaTipo = GASTO
+    const gastoIds = data
+      .filter((t) => t.referenciaTipo === 'GASTO' && t.referenciaId)
+      .map((t) => t.referenciaId as string);
+
+    let gastosMap = new Map<string, any>();
+    if (gastoIds.length > 0) {
+      const gastos = await this.prisma.gasto.findMany({
+        where: { id: { in: gastoIds } },
+        include: {
+          proyecto: {
+            select: { id: true, codigo: true, nombre: true, cliente: true },
+          },
+          proveedor: { select: { id: true, razonSocial: true, ruc: true } },
+        },
+      });
+      gastos.forEach((g) => gastosMap.set(g.id, g));
+    }
+
+    const enrichedData = data.map((t) => ({
+      ...t,
+      gastoDetalle: t.referenciaId ? gastosMap.get(t.referenciaId) || null : null,
+    }));
+
     return {
-      data,
+      data: enrichedData,
       meta: {
         total,
         page,
