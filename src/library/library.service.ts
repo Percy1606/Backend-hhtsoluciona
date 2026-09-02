@@ -41,7 +41,29 @@ export class LibraryService implements OnModuleInit {
 
   private async initGoogleDrive() {
     try {
-      // Opcion 1: Variable de entorno con JSON del Service Account (recomendado para produccion)
+      const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+      const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+      const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3005';
+      const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+
+      // Opcion 1: User OAuth con Refresh Token (4 TB de almacenamiento)
+      const keyPath = path.join(process.cwd(), 'oauth-credentials.json');
+      let tokens: any = null;
+      if (refreshToken) {
+        tokens = { refresh_token: refreshToken };
+      } else if (fs.existsSync(keyPath)) {
+        tokens = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
+      }
+
+      if (tokens && tokens.refresh_token) {
+        const oAuth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
+        oAuth2Client.setCredentials(tokens);
+        this.drive = google.drive({ version: 'v3', auth: oAuth2Client });
+        this.logger.log('Google Drive API initialized with User OAuth (4 TB Storage).');
+        return;
+      }
+
+      // Opcion 2: Service Account (si se usa Shared Drive)
       if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
         const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
         const auth = new google.auth.GoogleAuth({
@@ -50,20 +72,6 @@ export class LibraryService implements OnModuleInit {
         });
         this.drive = google.drive({ version: 'v3', auth });
         this.logger.log('Google Drive API initialized with Service Account (env var).');
-        return;
-      }
-
-      // Opcion 2: OAuth legacy con oauth-credentials.json (fallback local)
-      const keyPath = path.join(process.cwd(), 'oauth-credentials.json');
-      if (fs.existsSync(keyPath)) {
-        const tokens = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
-        const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-        const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-        const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3005';
-        const oAuth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
-        oAuth2Client.setCredentials(tokens);
-        this.drive = google.drive({ version: 'v3', auth: oAuth2Client });
-        this.logger.log('Google Drive API initialized with OAuth (legacy fallback).');
         return;
       }
 
