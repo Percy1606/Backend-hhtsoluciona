@@ -26,7 +26,11 @@ export class PrismaService
       console.log('[PrismaService] Env keys disponibles:', Object.keys(process.env).filter(k => k.includes('URL') || k.includes('DB') || k.includes('DATABASE')));
       throw new Error('DATABASE_URL is not defined in environment variables');
     }
-    const adapter = new PrismaMariaDb(databaseUrl);
+    let finalUrl = databaseUrl;
+    if (!finalUrl.includes('connectionLimit=')) {
+      finalUrl += finalUrl.includes('?') ? '&connectionLimit=50&acquireTimeout=30000' : '?connectionLimit=50&acquireTimeout=30000';
+    }
+    const adapter = new PrismaMariaDb(finalUrl);
     super({ adapter });
   }
 
